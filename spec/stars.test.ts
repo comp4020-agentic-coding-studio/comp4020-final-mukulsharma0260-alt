@@ -1,10 +1,15 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, inject, it } from "vitest";
 import { COOKIE_NAME } from "../src/cookies.ts";
 import { createStar, getByHash, idsSeenSince, openDb, touchSeen } from "../src/db.ts";
+import { migrate } from "../src/migrate.ts";
 import { formatDateInZone } from "../src/render.ts";
+
+const REAL_MIGRATIONS_DIR = fileURLToPath(new URL("../migrations", import.meta.url));
 
 const baseUrl = inject("baseUrl");
 
@@ -309,6 +314,57 @@ it("still reports a star as new even when a deleted row's rowid gets reused", ()
     // `second` is a star the visitor has never seen, created after their
     // recorded watermark. It must be reported as new.
     expect(idsSeenSince(db, watermark, viewer.id)).toContain(second.id);
+
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("the seq counter starts above a stale watermark left over from the old rowid bug, even once migration 003 introduces it", () => {
+  // Before star_seq existed, a visitor's last_seen_seq could be set from
+  // MAX(rowid) while many stars existed, then survive the deletion of all
+  // of them, leaving it higher than the current MAX(rowid) among whatever
+  // rows remain (exactly what the production deletion batch risked). This
+  // simulates that stale state against only migrations 001+002, then runs
+  // migration 003 for real and checks the new counter still starts above it.
+  const dir = mkdtempSync(join(tmpdir(), "overlap-migrate-"));
+  const dbPath = join(dir, "stars.db");
+  const partialMigrationsDir = join(dir, "migrations");
+  mkdirSync(partialMigrationsDir);
+  for (const name of ["001_create_stars.sql", "002_add_last_seen_seq.sql"]) {
+    cpSync(join(REAL_MIGRATIONS_DIR, name), join(partialMigrationsDir, name));
+  }
+
+  try {
+    const db = new DatabaseSync(dbPath);
+    db.exec("PRAGMA journal_mode = WAL");
+    migrate(db, partialMigrationsDir);
+
+    const now = "2026-01-01T00:00:00.000Z";
+    for (let i = 1; i <= 5; i++) {
+      db.prepare(
+        `INSERT INTO stars (id, token_hash, x, y, created_at, updated_at, last_seen_at)
+         VALUES (?, ?, 0.1, 0.1, ?, ?, ?)`,
+      ).run(`star-${i}`, `h${i}`.padEnd(64, "0"), now, now, now);
+    }
+    // A visitor touched in while all 5 stars existed: their watermark became 5.
+    db.prepare("UPDATE stars SET last_seen_seq = 5 WHERE id = 'star-1'").run();
+    // Stars 2-5 (including the one that held rowid 5) are later deleted.
+    db.prepare("DELETE FROM stars WHERE id != 'star-1'").run();
+
+    const stale = db.prepare("SELECT last_seen_seq FROM stars WHERE id = 'star-1'").get() as {
+      last_seen_seq: number;
+    };
+    // star-1's stored watermark (5) is now above the table's own current max
+    // rowid (1) -- exactly the corrupt shape this check targets.
+    expect(stale.last_seen_seq).toBeGreaterThan(1);
+
+    migrate(db); // applies 003 for real, against the real migrations dir
+
+    const counter = db.prepare("SELECT next_seq FROM star_seq").get() as { next_seq: number };
+    const maxWatermark = db.prepare("SELECT MAX(last_seen_seq) AS m FROM stars").get() as { m: number };
+    expect(counter.next_seq).toBeGreaterThan(maxWatermark.m);
 
     db.close();
   } finally {
