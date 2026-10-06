@@ -2,7 +2,7 @@
 
 Durable anonymous star identity
 
-# Status: Proposed
+# Status: Accepted
 
 # Context
 
