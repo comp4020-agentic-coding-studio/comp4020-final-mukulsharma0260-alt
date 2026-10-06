@@ -21,3 +21,4 @@ What the agent needs to carry from any of it is your call.
 - Before interpreting a live result, state local HEAD, deployed SHA if known, and whether the tree is clean.
 - Do not claim a visitor is physically present. For Crit 8, "last seen" means their last successful request to `/api/here`.
 - A test that passes on rerun is a failing test until its cause is found.
+- Live checks against production are read-only. If a live check must write, it deletes what it created in the same step and reports the ids.
