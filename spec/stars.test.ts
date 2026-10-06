@@ -34,6 +34,19 @@ function circleCount(html: string): number {
   return (html.match(/<circle /g) ?? []).length;
 }
 
+it("the sky's viewBox is square and cannot be stretched", async () => {
+  const html = await fetchHomeHtml();
+  const svgTag = html.match(/<svg id="sky"[^>]*>/);
+  expect(svgTag).not.toBeNull();
+
+  const viewBox = svgTag![0].match(/viewBox="([^"]+)"/);
+  expect(viewBox).not.toBeNull();
+  const [, , w, h] = viewBox![1]!.split(/\s+/).map(Number);
+  expect(w).toBe(h);
+
+  expect(svgTag![0]).toMatch(/preserveAspectRatio="xMidYMid meet"/);
+});
+
 it("repeated anonymous GET / creates no stars", async () => {
   const before = circleCount(await fetchHomeHtml());
   await fetchHomeHtml();
