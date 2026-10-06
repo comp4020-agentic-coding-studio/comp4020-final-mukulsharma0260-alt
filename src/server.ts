@@ -9,8 +9,18 @@ import {
   parseCookies,
   serializeIdentityCookie,
 } from "./cookies.ts";
-import { createStar, getByHash, idsCreatedAfter, moveStar, openDb, touchSeen } from "./db.ts";
+import {
+  createStar,
+  getByHash,
+  idsCreatedAfter,
+  listAll,
+  moveStar,
+  openDb,
+  touchSeen,
+} from "./db.ts";
 import type { Star } from "./db.ts";
+import { renderHomePage } from "./render.ts";
+import { renderMarkdown } from "./markdown.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const DB_PATH = process.env.DB_PATH ?? "/data/stars.db";
@@ -36,14 +46,6 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 function sendHtml(res: ServerResponse, status: number, html: string): void {
   res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
   res.end(html);
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -83,15 +85,10 @@ function identityFromRequest(req: IncomingMessage): { token: string; star: Star 
   return { token, star };
 }
 
-// Interim /readme/ render: verbatim, HTML-escaped, in a <pre> — swapped for a
-// real Markdown render once src/markdown.ts lands.
 function renderReadmePage(): string {
   const md = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  return `<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><title>About Overlap</title></head><body><main><pre>${escapeHtml(md)}</pre></main></body></html>`;
-}
-
-function renderHomePage(): string {
-  return `<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><title>Overlap</title></head><body><main><h1>Overlap</h1><p>Under construction.</p><p><a href="/readme/">About this app</a></p></main></body></html>`;
+  const body = renderMarkdown(md);
+  return `<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>About Overlap</title><style>body{max-width:40rem;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5}</style></head><body><main>${body}</main><p><a href="/">Back to the sky</a></p></body></html>`;
 }
 
 async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -172,9 +169,15 @@ const server = createServer(async (req, res) => {
     const path = url.pathname;
 
     if (req.method === "GET" && path === "/") {
-      sendHtml(res, 200, renderHomePage());
+      const identity = identityFromRequest(req);
+      const stars = listAll(db);
+      sendHtml(res, 200, renderHomePage(stars, identity?.star.id));
     } else if (req.method === "GET" && path === "/readme/") {
       sendHtml(res, 200, renderReadmePage());
+    } else if (req.method === "GET" && path === "/sky.js") {
+      const js = readFileSync(new URL("../public/sky.js", import.meta.url), "utf8");
+      res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      res.end(js);
     } else if (req.method === "POST" && path === "/api/star") {
       await handleCreateStar(req, res);
     } else if (req.method === "POST" && path === "/api/star/move") {
