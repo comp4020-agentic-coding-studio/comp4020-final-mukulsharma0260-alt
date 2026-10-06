@@ -241,7 +241,16 @@ async function reportHere() {
   }
 }
 
+function localizeSinceDate() {
+  const time = document.querySelector("#since time");
+  if (!time) return;
+  const iso = time.getAttribute("datetime");
+  if (!iso) return;
+  time.textContent = new Intl.DateTimeFormat("en-AU", { dateStyle: "long" }).format(new Date(iso));
+}
+
 (function init() {
+  localizeSinceDate();
   const hasStar = document.body.dataset.hasStar === "true";
 
   if (hasStar) {

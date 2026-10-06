@@ -13,8 +13,8 @@ function escapeAttr(s: string): string {
   return escapeHtml(s);
 }
 
-function readableDate(iso: string): string {
-  return new Intl.DateTimeFormat("en-AU", { dateStyle: "long" }).format(new Date(iso));
+export function formatDateInZone(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-AU", { dateStyle: "long", timeZone }).format(new Date(iso));
 }
 
 function renderStar(star: Star, viewerStarId: string | undefined, now: Date): string {
@@ -63,7 +63,7 @@ export function renderHomePage(stars: Star[], viewerStarId: string | undefined, 
     : `<p id="count">${countText}</p>`;
 
   const sinceText = ownStar
-    ? `<p id="since">Your star since ${readableDate(ownStar.createdAt)}.</p>`
+    ? `<p id="since">Your star since <time datetime="${escapeAttr(ownStar.createdAt)}">${formatDateInZone(ownStar.createdAt, "Australia/Sydney")}</time>.</p>`
     : "";
 
   const placePrompt = !ownStar
