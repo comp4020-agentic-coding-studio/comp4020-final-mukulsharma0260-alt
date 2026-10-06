@@ -2,6 +2,9 @@ node_modules/
 dist/
 *.log
 
+# local visual-check screenshots, not part of the shipped app
+screenshots/
+
 # local SQLite DB (production data lives on the Fly volume, not in git)
 data/
 

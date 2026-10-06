@@ -1,5 +1,5 @@
 const svg = document.getElementById("sky");
-const banner = document.getElementById("banner");
+const statusEl = document.getElementById("status");
 const countEl = document.getElementById("count");
 const placePrompt = document.getElementById("place-prompt");
 const placeButton = document.getElementById("place-star");
@@ -8,8 +8,23 @@ const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matc
 const SVG_NS = "http://www.w3.org/2000/svg";
 const HOUR_MS = 60 * 60 * 1000;
 
-function announce(text) {
-  banner.textContent = text;
+let statusTimer;
+function announce(text, { transient = true } = {}) {
+  clearTimeout(statusTimer);
+  statusEl.textContent = text;
+  statusEl.classList.remove("error");
+  statusEl.classList.add("visible");
+  if (transient) {
+    statusTimer = setTimeout(() => {
+      statusEl.classList.remove("visible");
+    }, 2200);
+  }
+}
+
+function announceError(text) {
+  clearTimeout(statusTimer);
+  statusEl.textContent = text;
+  statusEl.classList.add("visible", "error");
 }
 
 function clamp01(n) {
@@ -57,12 +72,12 @@ function makeOwnStarGroup(star) {
   ring.setAttribute("class", "star-ring");
   ring.setAttribute("cx", String(star.x));
   ring.setAttribute("cy", String(star.y));
-  ring.setAttribute("r", "0.028");
+  ring.setAttribute("r", "0.026");
 
   const circle = document.createElementNS(SVG_NS, "circle");
   circle.setAttribute("cx", String(star.x));
   circle.setAttribute("cy", String(star.y));
-  circle.setAttribute("r", "0.018");
+  circle.setAttribute("r", "0.017");
   circle.setAttribute("data-id", star.id);
   circle.setAttribute("data-own", "true");
   circle.setAttribute("class", "star bright own");
@@ -73,7 +88,7 @@ function makeOwnStarGroup(star) {
   const label = document.createElementNS(SVG_NS, "text");
   label.setAttribute("class", "star-you-label");
   label.setAttribute("x", String(star.x));
-  label.setAttribute("y", String(star.y - 0.035));
+  label.setAttribute("y", String(star.y - 0.042));
   label.setAttribute("text-anchor", "middle");
   label.textContent = "you";
 
@@ -89,7 +104,9 @@ function saveMove(x, y) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ x, y }),
-    }).catch(() => {});
+    }).catch(() => {
+      announceError("Could not save your star's new position. Check your connection and try again.");
+    });
   }, 300);
 }
 
@@ -99,7 +116,7 @@ function moveVisualTo(parts, x, y) {
   parts.circle.setAttribute("cx", String(x));
   parts.circle.setAttribute("cy", String(y));
   parts.label.setAttribute("x", String(x));
-  parts.label.setAttribute("y", String(y - 0.035));
+  parts.label.setAttribute("y", String(y - 0.042));
 }
 
 function wireDrag(parts) {
@@ -130,8 +147,14 @@ function wireDrag(parts) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ x, y }),
-    }).catch(() => {});
-    announce("Star moved.");
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("move failed");
+        announce("Star moved.");
+      })
+      .catch(() => {
+        announceError("Could not save your star's new position. Check your connection and try again.");
+      });
   }
 
   circle.addEventListener("pointerup", endDrag);
@@ -155,11 +178,21 @@ function wireDrag(parts) {
 
 async function placeStar(x, y) {
   const body = x === undefined ? "{}" : JSON.stringify({ x, y });
-  const res = await fetch("/api/star", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body,
-  });
+  let res;
+  try {
+    res = await fetch("/api/star", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+  } catch {
+    announceError("Could not place your star. Check your connection and try again.");
+    return;
+  }
+  if (!res.ok) {
+    announceError("Could not place your star. Please try again.");
+    return;
+  }
   const { star } = await res.json();
 
   document.body.dataset.hasStar = "true";
@@ -193,7 +226,7 @@ async function reportHere() {
       : data.newCount === 1
         ? "1 new star since."
         : `${data.newCount} new stars since.`;
-    announce(`Welcome back. ${sincePart} ${newPart}`.trim());
+    announce(`Welcome back. ${sincePart} ${newPart}`.trim(), { transient: false });
   }
 
   for (const id of data.newStarIds ?? []) {
