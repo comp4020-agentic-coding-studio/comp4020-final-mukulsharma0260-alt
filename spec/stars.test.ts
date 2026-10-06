@@ -151,6 +151,32 @@ describe("invalid move coordinates are rejected without changing state", () => {
   }
 });
 
+it("the stars table has exactly its known columns, no more and no less", () => {
+  const dir = mkdtempSync(join(tmpdir(), "overlap-db-"));
+  const dbPath = join(dir, "stars.db");
+
+  try {
+    const db = openDb(dbPath);
+    const columns = (db.prepare("PRAGMA table_info(stars)").all() as Array<{ name: string }>).map(
+      (c) => c.name,
+    );
+    expect(columns).toEqual([
+      "id",
+      "token_hash",
+      "x",
+      "y",
+      "created_at",
+      "updated_at",
+      "last_seen_at",
+      "last_seen_seq",
+      "seq",
+    ]);
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 it("homepage HTML never exposes a cookie token, token hash, or another visitor's exact timestamp", async () => {
   const identity = await createIdentity();
   const other = await createIdentity();
