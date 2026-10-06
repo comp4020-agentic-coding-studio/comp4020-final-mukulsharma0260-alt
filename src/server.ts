@@ -12,7 +12,7 @@ import {
 import {
   createStar,
   getByHash,
-  idsCreatedAfter,
+  idsSeenSince,
   listAll,
   moveStar,
   openDb,
@@ -173,7 +173,7 @@ function handleHere(req: IncomingMessage, res: ServerResponse): void {
 
   const now = new Date().toISOString();
   const result = touchSeen(db, hashToken(identity.token), now)!;
-  const newStarIds = idsCreatedAfter(db, result.previousLastSeenAt, result.star.id);
+  const newStarIds = idsSeenSince(db, result.previousLastSeenSeq, result.star.id);
   sendJson(res, 200, {
     hasStar: true,
     newStarIds,

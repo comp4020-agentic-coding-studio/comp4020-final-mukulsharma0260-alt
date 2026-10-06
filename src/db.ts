@@ -11,6 +11,7 @@ export interface Star {
   createdAt: string;
   updatedAt: string;
   lastSeenAt: string;
+  lastSeenSeq: number;
 }
 
 interface StarRow {
@@ -21,6 +22,7 @@ interface StarRow {
   created_at: string;
   updated_at: string;
   last_seen_at: string;
+  last_seen_seq: number;
 }
 
 function fromRow(row: StarRow): Star {
@@ -32,6 +34,7 @@ function fromRow(row: StarRow): Star {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastSeenAt: row.last_seen_at,
+    lastSeenSeq: row.last_seen_seq,
   };
 }
 
@@ -58,6 +61,11 @@ export function createStar(
     `INSERT INTO stars (id, token_hash, x, y, created_at, updated_at, last_seen_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(args.id, args.tokenHash, args.x, args.y, args.now, args.now, args.now);
+  // A new star starts "caught up" through its own row: rowid is assigned in
+  // strict insertion order with no ties, unlike created_at, so it's what the
+  // "since last visit" window is measured against (see idsSeenSince below).
+  const seqRow = db.prepare("SELECT MAX(rowid) AS seq FROM stars").get() as { seq: number };
+  db.prepare("UPDATE stars SET last_seen_seq = ? WHERE id = ?").run(seqRow.seq, args.id);
   return {
     id: args.id,
     tokenHash: args.tokenHash,
@@ -66,6 +74,7 @@ export function createStar(
     createdAt: args.now,
     updatedAt: args.now,
     lastSeenAt: args.now,
+    lastSeenSeq: seqRow.seq,
   };
 }
 
@@ -82,18 +91,25 @@ export function moveStar(
   return getByHash(db, tokenHash);
 }
 
-// Returns the star's last_seen_at as it was *before* this call, then advances
-// it to `now`. The caller needs the previous value to count what's new since.
+// Returns the star's last_seen_at/last_seen_seq as they were *before* this
+// call, then advances both to `now`/the current max rowid. The caller needs
+// the previous seq to count what's new since (see idsSeenSince below); the
+// previous timestamp is only for human display ("you were last here...").
 export function touchSeen(
   db: DatabaseSync,
   tokenHash: string,
   now: string,
-): { star: Star; previousLastSeenAt: string } | undefined {
+): { star: Star; previousLastSeenAt: string; previousLastSeenSeq: number } | undefined {
   const before = getByHash(db, tokenHash);
   if (!before) return undefined;
-  db.prepare("UPDATE stars SET last_seen_at = ? WHERE token_hash = ?").run(now, tokenHash);
+  const seqRow = db.prepare("SELECT MAX(rowid) AS seq FROM stars").get() as { seq: number };
+  db.prepare("UPDATE stars SET last_seen_at = ?, last_seen_seq = ? WHERE token_hash = ?").run(
+    now,
+    seqRow.seq,
+    tokenHash,
+  );
   const after = getByHash(db, tokenHash)!;
-  return { star: after, previousLastSeenAt: before.lastSeenAt };
+  return { star: after, previousLastSeenAt: before.lastSeenAt, previousLastSeenSeq: before.lastSeenSeq };
 }
 
 export function listAll(db: DatabaseSync): Star[] {
@@ -101,16 +117,19 @@ export function listAll(db: DatabaseSync): Star[] {
   return rows.map(fromRow);
 }
 
-export function countCreatedAfter(db: DatabaseSync, afterIso: string, excludeId: string): number {
-  const row = db
-    .prepare("SELECT COUNT(*) AS n FROM stars WHERE created_at > ? AND id != ?")
-    .get(afterIso, excludeId) as unknown as { n: number };
-  return row.n;
-}
-
-export function idsCreatedAfter(db: DatabaseSync, afterIso: string, excludeId: string): string[] {
+// created_at has only millisecond resolution, so two stars can tie on it, and
+// so can a star's created_at and a visitor's own touch timestamp a moment
+// later. Comparing against created_at with ">=" fixes the first tie but
+// double-reports a star whose created_at happens to equal a later touch's
+// own timestamp, since that timestamp becomes the next call's lower bound
+// too. rowid has no such ambiguity: SQLite assigns it in strict insertion
+// order, one per row, never tied, even for rows inserted in the same
+// millisecond. Comparing against a rowid-based watermark instead means a
+// star is counted as new in exactly one call, never zero, never two,
+// regardless of how its created_at happens to line up with any timestamp.
+export function idsSeenSince(db: DatabaseSync, afterSeq: number, excludeId: string): string[] {
   const rows = db
-    .prepare("SELECT id FROM stars WHERE created_at > ? AND id != ?")
-    .all(afterIso, excludeId) as unknown as { id: string }[];
+    .prepare("SELECT id FROM stars WHERE rowid > ? AND id != ?")
+    .all(afterSeq, excludeId) as unknown as { id: string }[];
   return rows.map((r) => r.id);
 }
