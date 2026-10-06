@@ -37,6 +37,20 @@ function randomUnit(): number {
   return Math.random();
 }
 
+// Same-origin check for state-changing requests: a cross-site page can still
+// cause the browser to send the identity cookie, so a mismatched Origin is
+// rejected before it reaches any handler. Requests with no Origin header
+// (same-origin navigations and most non-browser clients) are allowed through.
+function isSameOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -160,7 +174,14 @@ function handleHere(req: IncomingMessage, res: ServerResponse): void {
   const now = new Date().toISOString();
   const result = touchSeen(db, hashToken(identity.token), now)!;
   const newStarIds = idsCreatedAfter(db, result.previousLastSeenAt, result.star.id);
-  sendJson(res, 200, { hasStar: true, newStarIds, newCount: newStarIds.length });
+  sendJson(res, 200, {
+    hasStar: true,
+    newStarIds,
+    newCount: newStarIds.length,
+    // The caller's own previous visit time — not another visitor's — so this
+    // is not the "other people's exact timestamps" the rules forbid exposing.
+    previousLastSeenAt: result.previousLastSeenAt,
+  });
 }
 
 const server = createServer(async (req, res) => {
@@ -178,6 +199,8 @@ const server = createServer(async (req, res) => {
       const js = readFileSync(new URL("../public/sky.js", import.meta.url), "utf8");
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       res.end(js);
+    } else if (req.method === "POST" && path.startsWith("/api/") && !isSameOrigin(req)) {
+      sendJson(res, 403, { error: "cross-origin request rejected" });
     } else if (req.method === "POST" && path === "/api/star") {
       await handleCreateStar(req, res);
     } else if (req.method === "POST" && path === "/api/star/move") {
