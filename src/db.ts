@@ -12,6 +12,7 @@ export interface Star {
   updatedAt: string;
   lastSeenAt: string;
   lastSeenSeq: number;
+  seq: number;
 }
 
 interface StarRow {
@@ -23,6 +24,7 @@ interface StarRow {
   updated_at: string;
   last_seen_at: string;
   last_seen_seq: number;
+  seq: number;
 }
 
 function fromRow(row: StarRow): Star {
@@ -35,7 +37,22 @@ function fromRow(row: StarRow): Star {
     updatedAt: row.updated_at,
     lastSeenAt: row.last_seen_at,
     lastSeenSeq: row.last_seen_seq,
+    seq: row.seq,
   };
+}
+
+// star_seq holds a single counter row that only ever increases. Unlike
+// rowid, its value is never freed up by a delete, so a watermark taken from
+// it can never be handed back out to a different, later star.
+function nextSeq(db: DatabaseSync): number {
+  db.prepare("UPDATE star_seq SET next_seq = next_seq + 1 WHERE id = 1").run();
+  const row = db.prepare("SELECT next_seq - 1 AS seq FROM star_seq WHERE id = 1").get() as { seq: number };
+  return row.seq;
+}
+
+function currentMaxSeq(db: DatabaseSync): number {
+  const row = db.prepare("SELECT next_seq - 1 AS seq FROM star_seq WHERE id = 1").get() as { seq: number };
+  return row.seq;
 }
 
 export function openDb(path: string): DatabaseSync {
@@ -57,15 +74,15 @@ export function createStar(
   db: DatabaseSync,
   args: { id: string; tokenHash: string; x: number; y: number; now: string },
 ): Star {
+  // A new star starts "caught up" through its own row: seq is assigned from
+  // star_seq in strict, never-reused insertion order, unlike created_at, so
+  // it's what the "since last visit" window is measured against (see
+  // idsSeenSince below).
+  const seq = nextSeq(db);
   db.prepare(
-    `INSERT INTO stars (id, token_hash, x, y, created_at, updated_at, last_seen_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(args.id, args.tokenHash, args.x, args.y, args.now, args.now, args.now);
-  // A new star starts "caught up" through its own row: rowid is assigned in
-  // strict insertion order with no ties, unlike created_at, so it's what the
-  // "since last visit" window is measured against (see idsSeenSince below).
-  const seqRow = db.prepare("SELECT MAX(rowid) AS seq FROM stars").get() as { seq: number };
-  db.prepare("UPDATE stars SET last_seen_seq = ? WHERE id = ?").run(seqRow.seq, args.id);
+    `INSERT INTO stars (id, token_hash, x, y, created_at, updated_at, last_seen_at, seq, last_seen_seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(args.id, args.tokenHash, args.x, args.y, args.now, args.now, args.now, seq, seq);
   return {
     id: args.id,
     tokenHash: args.tokenHash,
@@ -74,7 +91,8 @@ export function createStar(
     createdAt: args.now,
     updatedAt: args.now,
     lastSeenAt: args.now,
-    lastSeenSeq: seqRow.seq,
+    lastSeenSeq: seq,
+    seq,
   };
 }
 
@@ -92,9 +110,9 @@ export function moveStar(
 }
 
 // Returns the star's last_seen_at/last_seen_seq as they were *before* this
-// call, then advances both to `now`/the current max rowid. The caller needs
-// the previous seq to count what's new since (see idsSeenSince below); the
-// previous timestamp is only for human display ("you were last here...").
+// call, then advances both to `now`/the current star_seq counter. The caller
+// needs the previous seq to count what's new since (see idsSeenSince below);
+// the previous timestamp is only for human display ("you were last here...").
 export function touchSeen(
   db: DatabaseSync,
   tokenHash: string,
@@ -102,10 +120,10 @@ export function touchSeen(
 ): { star: Star; previousLastSeenAt: string; previousLastSeenSeq: number } | undefined {
   const before = getByHash(db, tokenHash);
   if (!before) return undefined;
-  const seqRow = db.prepare("SELECT MAX(rowid) AS seq FROM stars").get() as { seq: number };
+  const seq = currentMaxSeq(db);
   db.prepare("UPDATE stars SET last_seen_at = ?, last_seen_seq = ? WHERE token_hash = ?").run(
     now,
-    seqRow.seq,
+    seq,
     tokenHash,
   );
   const after = getByHash(db, tokenHash)!;
@@ -122,14 +140,14 @@ export function listAll(db: DatabaseSync): Star[] {
 // later. Comparing against created_at with ">=" fixes the first tie but
 // double-reports a star whose created_at happens to equal a later touch's
 // own timestamp, since that timestamp becomes the next call's lower bound
-// too. rowid has no such ambiguity: SQLite assigns it in strict insertion
-// order, one per row, never tied, even for rows inserted in the same
-// millisecond. Comparing against a rowid-based watermark instead means a
-// star is counted as new in exactly one call, never zero, never two,
-// regardless of how its created_at happens to line up with any timestamp.
+// too. seq has no such ambiguity: it's assigned in strict insertion order,
+// one per row, never tied even within the same millisecond, and — unlike
+// rowid — never reused after a row is deleted, so a star is counted as new
+// in exactly one call, never zero, never two, and never silently absorbed
+// into an earlier watermark.
 export function idsSeenSince(db: DatabaseSync, afterSeq: number, excludeId: string): string[] {
   const rows = db
-    .prepare("SELECT id FROM stars WHERE rowid > ? AND id != ?")
+    .prepare("SELECT id FROM stars WHERE seq > ? AND id != ?")
     .all(afterSeq, excludeId) as unknown as { id: string }[];
   return rows.map((r) => r.id);
 }
