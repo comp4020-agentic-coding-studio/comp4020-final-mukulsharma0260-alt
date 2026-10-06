@@ -170,8 +170,19 @@ it("homepage HTML never exposes a cookie token, token hash, or another visitor's
   expect(html.toLowerCase()).not.toContain("token_hash");
   // Nobody's last_seen_at is ever shown exactly, brightness is a bucket.
   expect(html).not.toContain(touchedStar.lastSeenAt);
-  expect(html).not.toContain(other.star.createdAt);
-  expect(html).not.toContain(other.star.lastSeenAt);
+  // The only timestamp the HTML ever embeds is the viewer's own createdAt
+  // (in <time datetime>), so `other`'s createdAt can only coincide with it
+  // textually, never be shown as other's data. Two real-clock requests can
+  // land in the same millisecond, so skip the one case where that coincidence
+  // is expected and legitimate.
+  if (other.star.createdAt !== touchedStar.createdAt) {
+    expect(html).not.toContain(other.star.createdAt);
+  }
+  // other.star.lastSeenAt is still its creation-time value (equal to its own
+  // createdAt), so the same coincidental-collision guard applies here too.
+  if (other.star.lastSeenAt !== touchedStar.createdAt) {
+    expect(html).not.toContain(other.star.lastSeenAt);
+  }
 });
 
 it("/api/here reports only stars created since the caller's last visit", async () => {
@@ -269,6 +280,42 @@ it("never reports a star as new twice, even when its creation ties a later touch
   }
 });
 
+it("still reports a star as new even when a deleted row's rowid gets reused", () => {
+  // SQLite assigns a new row's rowid as (current max rowid) + 1. Deleting the
+  // row that currently holds the max rowid frees that exact value, so the
+  // next inserted row can be assigned it back. A watermark stored as a bare
+  // rowid snapshot can't tell a brand new star with a reused rowid apart from
+  // the old, already-seen star that used to have it.
+  const dir = mkdtempSync(join(tmpdir(), "overlap-db-"));
+  const dbPath = join(dir, "stars.db");
+
+  try {
+    const db = openDb(dbPath);
+    const now = "2026-01-01T00:00:00.000Z";
+    const viewerHash = "k".repeat(64);
+    const viewer = createStar(db, { id: "viewer-reuse", tokenHash: viewerHash, x: 0.1, y: 0.1, now });
+    const first = createStar(db, { id: "first-newest", tokenHash: "l".repeat(64), x: 0.2, y: 0.2, now });
+
+    // The visitor checks in while `first` is the newest star: their watermark
+    // now covers it.
+    const seen = touchSeen(db, viewerHash, now)!;
+    expect(idsSeenSince(db, seen.previousLastSeenSeq, viewer.id)).toContain(first.id);
+    const watermark = seen.star.lastSeenSeq;
+
+    // `first` held the largest rowid, so deleting it frees that rowid value.
+    db.prepare("DELETE FROM stars WHERE id = ?").run(first.id);
+    const second = createStar(db, { id: "second-newest", tokenHash: "m".repeat(64), x: 0.3, y: 0.3, now });
+
+    // `second` is a star the visitor has never seen, created after their
+    // recorded watermark. It must be reported as new.
+    expect(idsSeenSince(db, watermark, viewer.id)).toContain(second.id);
+
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 it("formats a star's date in the viewer's timezone, not the server's", () => {
   // 21:02 UTC on the 6th is already the morning of the 7th in Sydney
   // (UTC+11 in October). A server that formats in its own zone shows the
@@ -296,7 +343,7 @@ it("a star survives closing and reopening the database file", () => {
     // One row per migrations/*.sql file, each applied exactly once (not
     // reapplied on reopen).
     const applied = db2.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
-    expect(applied.n).toBe(2);
+    expect(applied.n).toBe(3);
     db2.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
