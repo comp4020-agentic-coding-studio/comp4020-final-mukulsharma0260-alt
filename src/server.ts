@@ -243,21 +243,23 @@ function handleEvents(req: IncomingMessage, res: ServerResponse): void {
   });
   res.flushHeaders();
 
-  eventStreams.add(res);
+  let wasOffline = false;
   if (starId) {
     const streams = eventStreamsByStarId.get(starId) ?? new Set<ServerResponse>();
-    const wasOffline = streams.size === 0;
+    wasOffline = streams.size === 0;
     streams.add(res);
     eventStreamsByStarId.set(starId, streams);
-    if (wasOffline) broadcastLiveStars();
   }
 
-  // Sync after registration so this client immediately receives the same
-  // temporary live state it has just contributed to.
+  // The snapshot goes out first, then this stream joins the broadcast set.
+  // All of this is synchronous, so no event can fall between the two, and
+  // the snapshot already includes the live state this stream contributes.
   sendEvent(res, "sync", {
     stars: listAll(db).map(publicStar),
     liveStarIds: liveStarIds(),
   });
+  eventStreams.add(res);
+  if (wasOffline) broadcastLiveStars();
 
   const heartbeat = setInterval(() => {
     if (!res.writableEnded && !res.destroyed) res.write(": keep-alive\n\n");
