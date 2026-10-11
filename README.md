@@ -1,35 +1,41 @@
 # Overlap
 
-**Overlap is a shared night sky that remembers anonymous visitors, and lets the people looking at it now notice one another.**
+**Overlap is a shared night sky that remembers only that anonymous people have been here.**
 
-Try it with a normal window and a private/incognito window. Two ordinary tabs are one person here because they share one anonymous cookie and therefore one star.
+To try it as two people, open a normal window and a private (incognito) window side by side, then move a star in one. Two tabs in one browser are one person.
 
-When I first arrive, I place one star. Its position is mine when I return. It is bright within an hour of a visit, softer within a day, dimmer within a week, and faint after that. It never disappears. This is *old light*: seeing a star is also seeing a small record of its past.
+When I first arrive, I place one star. Its position is mine when I return. The star is bright within an hour of a visit, softer within a day, dimmer within a week, and faint after that. It never disappears. The idea comes from real starlight: seeing a star is also seeing a small record of its past.
 
-A small blue halo is different. It means that browser has an open connection to the sky right now. If someone moves or places a star, every open sky changes without a reload. I do not call that person “present”: a tab can be open while someone is away, and a network connection can drop. The app says exactly what it knows—*a browser is looking at the sky*—and no more.
+A star also glows while someone is *looking at the sky now*: the browser has a live connection and the Overlap tab is visible. That does not mean the person is physically at their keyboard. A background tab can stay open for hours without attention, so visibility is the closest honest signal the app can use. The cost is that it unfairly hides someone who keeps Overlap open in the background while working, studying, or watching from another tab. [ADR 0005](docs/adr/0005-live-means-looking-at-the-sky.md) records the options I rejected.
 
 ## What good looks like here
 
-I want Overlap to feel unlike a social network. It should not ask visitors to introduce themselves, explain themselves, compete, collect likes, or fill a feed with text. A visitor should be able to leave a small mark without turning that mark into a profile.
+I want Overlap to feel unlike a social network. It should not ask visitors to introduce themselves, compete, collect likes, or fill a feed with text. A visitor should be able to leave a small mark without turning that mark into a profile.
 
-Erving Goffman's *Behavior in Public Places* helped me think about how much social life comes from simply noticing other people nearby, rather than from formal conversation. Thomas Erickson and Wendy Kellogg's idea of “social translucence” was another useful direction: systems can make people and activity visible without demanding that they perform for one another. Overlap takes only a small part of that idea. The sky makes shared use visible, but deliberately leaves out names and messages.
+Erving Goffman’s *Behavior in Public Places* helped me think about how much social life comes from simply noticing other people nearby. Thomas Erickson and Wendy Kellogg’s idea of “social translucence” was another useful direction: systems can make people and activity visible without demanding that people perform for one another. The sky makes a trace of shared use visible, but deliberately leaves out names and messages.
 
-Robin Sloan's idea of software as a “home-cooked meal” helped me keep the scale small. Overlap is not trying to become a universal social platform. It is a small place for a class, a group of friends, or one particular evening. Its value is in the atmosphere of return, not in serving millions of people.
+Robin Sloan’s idea of software as a “home-cooked meal” helped me keep the scale small. Overlap is a small place for a class, a group of friends, or one particular evening. Its value is in the atmosphere of return, not in serving millions of people.
 
-A good Overlap sky should feel calm and legible. Returning to an old star should feel like coming back to somewhere that remembers you. Opening it beside somebody else should make the sky subtly more alive, without making either of you perform for the other.
+A good Overlap sky should feel calm and legible: coming back to an old star should feel like returning somewhere that remembers you.
 
 ## What the app enforces
 
-Some promises are technical and checked in the repository:
+These promises are checked in the repository:
 
-- one browser identity can create only one star, and only that browser can move it;
-- a placed star and its position survive reloads, server restarts, and redeploys;
-- every open browser receives another star's placement or movement through a live connection in about a second, without a reload;
-- a live halo exists only while at least one browser connection for that star is open, and is never stored as permanent history;
-- there are no names, free-text messages, or client-provided ownership claims; and
-- raw identity tokens, token hashes, and other visitors' exact timestamps never reach the page or live events.
+- each browser owns one star, and only that browser can move it;
+- opening the page never creates or changes a star;
+- a star placed or moved in one browser reaches every other open sky within a second, with no reload;
+- two tabs of one browser count as one person, and a halo, held only in server memory, goes out when the last visible tab closes or hides;
+- star positions survive reloads, restarts and redeploys (the last checked live);
+- the new-star count on return stays exact, even after deletions;
+- there are no visitor names or free-text messages; and
+- tokens, token hashes, and other visitors’ exact timestamps never appear on the page or in live updates.
 
-Other claims need human judgement: whether the sky feels like a record of being together, whether old light makes return meaningful, and whether live halos make co-presence felt without making the sky noisy.
+Other claims need human judgement:
+
+- whether the sky feels like a record of being together;
+- whether a glowing star feels like company rather than surveillance; and
+- whether the visual design feels quiet rather than empty.
 
 ## Sources
 
