@@ -2,7 +2,10 @@
 
 Live means an open sky connection
 
-# Status: Accepted
+# Status: Superseded by [ADR 0005](0005-live-means-looking-at-the-sky.md)
+
+The transport choice below (server-sent events) still stands. What changed is
+the behaviour: "any open connection" became "an open and visible tab".
 
 # Context
 
