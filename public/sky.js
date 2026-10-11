@@ -119,7 +119,10 @@ function updateLiveStatus(ids) {
   const others = [...liveStarIds].filter((id) => id !== ownId).length;
   liveStatusEl.classList.toggle("connected", Boolean(ownId && liveStarIds.has(ownId)));
   if (!ownId) {
-    liveStatusEl.textContent = "Place a star to join the live sky.";
+    const n = liveStarIds.size;
+    liveStatusEl.textContent = n === 0
+      ? "Place a star to join the live sky."
+      : `${n} ${n === 1 ? "browser is" : "browsers are"} looking at the sky right now. Place a star to join.`;
   } else if (!liveStarIds.has(ownId)) {
     liveStatusEl.textContent = "Reconnecting to the sky…";
   } else if (others === 0) {
@@ -148,12 +151,29 @@ function startRealtime() {
     updateLiveStatus(JSON.parse(event.data).starIds ?? []);
   });
   realtime.addEventListener("error", () => {
-    if (liveStatusEl && document.body.dataset.hasStar === "true") {
+    if (liveStatusEl) {
       liveStatusEl.classList.remove("connected");
       liveStatusEl.textContent = "Reconnecting to the sky…";
     }
   });
 }
+
+// Live means an open AND visible tab (ADR 0005). A hidden tab drops its
+// stream, so its halo goes out on the server; showing the tab again
+// reconnects, gets a fresh snapshot, and checks in like a return visit.
+function stopRealtime() {
+  realtime?.close();
+  realtime = undefined;
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    stopRealtime();
+    return;
+  }
+  startRealtime();
+  reportHere();
+});
 
 function ringPulse(circle) {
   if (reducedMotion) return;
@@ -363,6 +383,10 @@ function localizeSinceDate() {
 (function init() {
   localizeSinceDate();
   const hasStar = document.body.dataset.hasStar === "true";
+  const visible = document.visibilityState !== "hidden";
+
+  // Every viewer watches the live sky, with or without a star of their own.
+  if (visible) startRealtime();
 
   if (hasStar) {
     const ownCircle = svg.querySelector('circle[data-own="true"]');
@@ -372,8 +396,7 @@ function localizeSinceDate() {
       const label = group.querySelector(".star-you-label");
       wireDrag({ circle: ownCircle, ring, label });
     }
-    reportHere();
-    startRealtime();
+    if (visible) reportHere();
     return;
   }
 
