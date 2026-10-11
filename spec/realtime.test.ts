@@ -253,3 +253,55 @@ it("no live event carries a cookie token, token hash, or exact timestamp", async
     expect(event.raw).not.toMatch(/createdAt|updatedAt|lastSeenAt|token/i);
   }
 });
+
+it("a star placed by one browser reaches another browser's open stream within a second", async () => {
+  const watcher = await openEventStream();
+  try {
+    await nextMatching(watcher, (event) => event.type === "sync");
+    const started = Date.now();
+    const a = await createIdentity();
+
+    const event = await nextMatching(
+      watcher,
+      (received) => received.type === "star"
+        && received.data.change === "created"
+        && (received.data.star as { id?: string }).id === a.star.id,
+    );
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(event.data.star).toMatchObject({ id: a.star.id, x: expect.any(Number), y: expect.any(Number) });
+  } finally {
+    await watcher.close();
+  }
+});
+
+it("two tabs with one cookie are one live star, live until the last one closes", async () => {
+  const a = await createIdentity();
+  const watcher = await openEventStream();
+  const tab1 = await openEventStream(a.cookie);
+  const tab2 = await openEventStream(a.cookie);
+  const liveIds = (event: StreamEvent) => (event.data.liveStarIds ?? event.data.starIds) as string[];
+
+  try {
+    await nextMatching(watcher, (e) => e.type === "live" && liveIds(e).includes(a.star.id));
+
+    // One tab closing must not end the star's halo. A fresh stream's
+    // snapshot shows the server's live set after that close was handled.
+    await tab1.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const fresh = await openEventStream();
+    try {
+      const snapshot = await nextMatching(fresh, (e) => e.type === "sync");
+      expect(liveIds(snapshot)).toContain(a.star.id);
+      expect(liveIds(snapshot).filter((id) => id === a.star.id)).toHaveLength(1);
+    } finally {
+      await fresh.close();
+    }
+
+    await tab2.close();
+    await nextMatching(watcher, (e) => e.type === "live" && !liveIds(e).includes(a.star.id));
+  } finally {
+    await tab1.close().catch(() => {});
+    await tab2.close().catch(() => {});
+    await watcher.close();
+  }
+});
