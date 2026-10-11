@@ -1,0 +1,3 @@
+# Crit 9 reflection
+
+The difficult part of real-time work was not making a message travel quickly; it was deciding what that message was allowed to claim. I first wanted a star to mean that its person was “here”, but an open tab, a sleeping laptop, and a flaky connection make that untrue. I changed the rule to “a browser is looking at the sky” and kept that state only in server memory, so a restart or disconnect cannot become fake permanent presence. In Crit 10 I will collect only the evidence that helps me judge whether this quiet signal is meaningful, rather than adding a dashboard just because the server can count things.
