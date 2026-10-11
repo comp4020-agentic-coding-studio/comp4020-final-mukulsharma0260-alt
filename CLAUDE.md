@@ -27,3 +27,7 @@ What the agent needs to carry from any of it is your call.
 - A test that passes on rerun is a failing test until its cause is found.
 - Live checks against production are read-only. If a live check must write, it deletes what it created in the same step and reports the ids.
 - Back up SQLite only after a WAL checkpoint; copying the main file alone misses recent writes.
+- Presence lives in memory only, never in the database.
+- Every live event follows the same privacy rules as the page.
+- Never claim a person is physically present; live means an open, visible tab.
+- Every viewer gets live updates, with or without a star.
