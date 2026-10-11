@@ -30,7 +30,7 @@ My first real-time version ([`8d9f16d`](https://github.com/comp4020-agentic-codi
 
 ## Harness and acceptance
 
-The rules live in `CLAUDE.md`, and each important one has a check in `spec/` that I saw fail before trusting it. For Crit 9 the checks run against the real HTTP server: a star placed or moved by one browser reaches another browser’s stream within a second, even when that viewer has no star; opening the stream writes nothing; no event leaks a token, hash, or exact time; and two connections with one cookie are one live star ([`8f8ef9a`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/8f8ef9a)). The production check was read-only: two streams received a snapshot and keep-alive pings, without creating any stars. I then tested it myself with a normal window, an incognito window, and my phone.
+The rules live in `CLAUDE.md`, and each important one has a check in `spec/` that I saw fail before trusting it. For Crit 9 the checks run against the real HTTP server: a star placed or moved by one browser reaches another browser’s stream within a second, even when that viewer has no star; opening the stream writes nothing; no event leaks a token, hash, or exact time; and two connections with one cookie are one live star ([`8f8ef9a`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/8f8ef9a), [`86b8389`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/86b8389)). The production check was read-only: two streams received a snapshot and keep-alive pings, without creating any stars. I then tested it myself with a normal window, an incognito window, and my phone.
 
 ## My role with the agent
 
