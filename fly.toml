@@ -35,6 +35,15 @@ auto_stop_machines = "stop"
 auto_start_machines = true
 min_machines_running = 0
 
+# Every open sky holds one long-lived SSE connection, and Fly's proxy counts it
+# against these limits (the default is 25). This leaves room for a showcase of
+# ~60 people with a couple of tabs each on the one machine. spec/fly.test.ts
+# keeps it from shrinking again.
+[http_service.concurrency]
+type = "connections"
+soft_limit = 200
+hard_limit = 250
+
 [[vm]]
 size = "shared-cpu-1x"
 memory = "256mb"
