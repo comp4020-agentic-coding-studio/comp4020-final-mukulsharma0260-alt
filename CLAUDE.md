@@ -20,6 +20,10 @@ What the agent needs to carry from any of it is your call.
 - The app accepts no free text from visitors.
 - Before interpreting a live result, state local HEAD, deployed SHA if known, and whether the tree is clean.
 - Do not claim a visitor is physically present. For Crit 8, "last seen" means their last successful request to `/api/here`.
+- For Crit 9, a star is "live" only while at least one authenticated browser has an open `/events` connection. Say "a browser is looking at the sky", never that a person is physically here.
+- `/events` may hold temporary connection state in server memory, but it must never write that state to SQLite. A deploy or restart clears it and reconnecting browsers rebuild it.
+- Live events may expose only a star id, normalised coordinates, and a rough brightness bucket. They must never expose a cookie token, token hash, or anybody's exact timestamp.
+- A move made by one browser must reach another open browser through `/events` without a reload, within about one second; keep a check that proves it.
 - A test that passes on rerun is a failing test until its cause is found.
 - Live checks against production are read-only. If a live check must write, it deletes what it created in the same step and reports the ids.
 - Back up SQLite only after a WAL checkpoint; copying the main file alone misses recent writes.

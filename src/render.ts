@@ -150,7 +150,10 @@ export function renderHomePage(stars: Star[], viewerStarId: string | undefined, 
   #status.visible { opacity: 1; }
   #status.error { color: #ffb3b3; }
 
-  #count, #since { color: #9a9ac0; font-size: 0.9rem; text-align: center; margin: 0.3rem 0; }
+  .star.live { stroke: #86d9ff; stroke-width: 0.004; filter: drop-shadow(0 0 0.018 rgba(134, 217, 255, 0.9)); }
+  .star.live.own { stroke: #ffd76a; }
+  #count, #since, #live-status { color: #9a9ac0; font-size: 0.9rem; text-align: center; margin: 0.3rem 0; }
+  #live-status.connected { color: #b8dff0; }
 
   #legend { display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin: 1rem 0 0.5rem; color: #9a9ac0; font-size: 0.78rem; }
   .legend-dot.bright { fill: #ffffff; }
@@ -175,6 +178,7 @@ export function renderHomePage(stars: Star[], viewerStarId: string | undefined, 
   </div>
   <div id="status" role="status" aria-live="polite"></div>
   ${belowSkyText}
+  <p id="live-status" aria-live="polite">${ownStar ? "Connecting to the sky…" : "Place a star to join the live sky."}</p>
   ${sinceText}
   ${renderLegend()}
   <footer><a href="/readme/">About this app</a></footer>

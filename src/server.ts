@@ -21,6 +21,7 @@ import {
 import type { Star } from "./db.ts";
 import { renderHomePage } from "./render.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { oldLight } from "./brightness.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const DB_PATH = process.env.DB_PATH ?? "/data/stars.db";
@@ -28,6 +29,13 @@ const IS_PROD = process.env.NODE_ENV === "production";
 const MAX_BODY_BYTES = 10_000;
 
 const db = openDb(DB_PATH);
+
+// The night sky has two kinds of state. Stars belong in SQLite because they
+// are old light and must outlive a deploy. An open SSE connection belongs only
+// in this process: it says that this browser is looking at the sky *now*, not
+// that a human is physically present. A restart intentionally clears it.
+const eventStreams = new Set<ServerResponse>();
+const eventStreamsByStarId = new Map<string, Set<ServerResponse>>();
 
 function isUnitInterval(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
@@ -79,7 +87,21 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 // Public shape of a star: the token hash never leaves the server.
+// Safe to send to another browser. In particular, this leaves out exact
+// timestamps: they are not needed to draw a star and would make the quiet sky
+// unexpectedly reveal another visitor's history.
 function publicStar(star: Star) {
+  return {
+    id: star.id,
+    x: star.x,
+    y: star.y,
+    brightness: oldLight(new Date(star.lastSeenAt)),
+  };
+}
+
+// A caller can receive their own timestamps; this keeps the existing welcome
+// and persistence behaviour without making that data public to other clients.
+function ownStar(star: Star) {
   return {
     id: star.id,
     x: star.x,
@@ -88,6 +110,29 @@ function publicStar(star: Star) {
     updatedAt: star.updatedAt,
     lastSeenAt: star.lastSeenAt,
   };
+}
+
+function sendEvent(res: ServerResponse, event: string, body: unknown): void {
+  if (res.writableEnded || res.destroyed) return;
+  res.write(`event: ${event}\ndata: ${JSON.stringify(body)}\n\n`);
+}
+
+function liveStarIds(): string[] {
+  return [...eventStreamsByStarId.entries()]
+    .filter(([, streams]) => streams.size > 0)
+    .map(([starId]) => starId);
+}
+
+function broadcast(event: string, body: unknown): void {
+  for (const stream of eventStreams) sendEvent(stream, event, body);
+}
+
+function broadcastLiveStars(): void {
+  broadcast("live", { starIds: liveStarIds() });
+}
+
+function broadcastStar(change: "created" | "moved", star: Star): void {
+  broadcast("star", { change, star: publicStar(star) });
 }
 
 function identityFromRequest(req: IncomingMessage): { token: string; star: Star } | undefined {
@@ -108,7 +153,7 @@ function renderReadmePage(): string {
 async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const existing = identityFromRequest(req);
   if (existing) {
-    sendJson(res, 200, { star: publicStar(existing.star) });
+    sendJson(res, 200, { star: ownStar(existing.star) });
     return;
   }
 
@@ -137,7 +182,8 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
   const star = createStar(db, { id: randomUUID(), tokenHash: hashToken(token), x, y, now });
 
   res.setHeader("Set-Cookie", serializeIdentityCookie(token, IS_PROD));
-  sendJson(res, 201, { star: publicStar(star) });
+  sendJson(res, 201, { star: ownStar(star) });
+  broadcastStar("created", star);
 }
 
 async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -161,7 +207,8 @@ async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promis
 
   const now = new Date().toISOString();
   const star = moveStar(db, hashToken(identity.token), b.x, b.y, now)!;
-  sendJson(res, 200, { star: publicStar(star) });
+  sendJson(res, 200, { star: ownStar(star) });
+  broadcastStar("moved", star);
 }
 
 function handleHere(req: IncomingMessage, res: ServerResponse): void {
@@ -184,6 +231,56 @@ function handleHere(req: IncomingMessage, res: ServerResponse): void {
   });
 }
 
+function handleEvents(req: IncomingMessage, res: ServerResponse): void {
+  const identity = identityFromRequest(req);
+  const starId = identity?.star.id;
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+
+  eventStreams.add(res);
+  if (starId) {
+    const streams = eventStreamsByStarId.get(starId) ?? new Set<ServerResponse>();
+    const wasOffline = streams.size === 0;
+    streams.add(res);
+    eventStreamsByStarId.set(starId, streams);
+    if (wasOffline) broadcastLiveStars();
+  }
+
+  // Sync after registration so this client immediately receives the same
+  // temporary live state it has just contributed to.
+  sendEvent(res, "sync", {
+    stars: listAll(db).map(publicStar),
+    liveStarIds: liveStarIds(),
+  });
+
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) res.write(": keep-alive\n\n");
+  }, 15_000);
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(heartbeat);
+    eventStreams.delete(res);
+    if (!starId) return;
+    const streams = eventStreamsByStarId.get(starId);
+    if (!streams) return;
+    streams.delete(res);
+    if (streams.size > 0) return;
+    eventStreamsByStarId.delete(starId);
+    broadcastLiveStars();
+  };
+  req.on("close", close);
+  res.on("close", close);
+}
+
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -199,6 +296,8 @@ const server = createServer(async (req, res) => {
       const js = readFileSync(new URL("../public/sky.js", import.meta.url), "utf8");
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       res.end(js);
+    } else if (req.method === "GET" && path === "/events") {
+      handleEvents(req, res);
     } else if (req.method === "POST" && path.startsWith("/api/") && !isSameOrigin(req)) {
       sendJson(res, 403, { error: "cross-origin request rejected" });
     } else if (req.method === "POST" && path === "/api/star") {

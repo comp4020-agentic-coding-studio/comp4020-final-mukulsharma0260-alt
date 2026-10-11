@@ -1,6 +1,7 @@
 const svg = document.getElementById("sky");
 const statusEl = document.getElementById("status");
 const countEl = document.getElementById("count");
+const liveStatusEl = document.getElementById("live-status");
 const placePrompt = document.getElementById("place-prompt");
 const placeButton = document.getElementById("place-star");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -9,6 +10,8 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const HOUR_MS = 60 * 60 * 1000;
 
 let statusTimer;
+let realtime;
+let liveStarIds = new Set();
 function announce(text, { transient = true } = {}) {
   clearTimeout(statusTimer);
   statusEl.textContent = text;
@@ -43,6 +46,113 @@ function updateCount() {
   if (!countEl) return;
   const n = svg.querySelectorAll("circle[data-id]").length;
   countEl.textContent = n === 1 ? "1 star" : `${n} stars`;
+}
+
+function starSelector(id) {
+  return `circle[data-id="${CSS.escape(id)}"]`;
+}
+
+function setCirclePosition(circle, x, y) {
+  circle.setAttribute("cx", String(x));
+  circle.setAttribute("cy", String(y));
+}
+
+function remoteStarClass(star) {
+  return `star ${star.brightness ?? "bright"}${liveStarIds.has(star.id) ? " live" : ""}`;
+}
+
+function updateStarFromServer(star) {
+  const existing = svg.querySelector(starSelector(star.id));
+  if (existing?.dataset.own === "true") {
+    const group = existing.closest("g.own-star-group");
+    const ring = group?.querySelector(".star-ring");
+    const label = group?.querySelector(".star-you-label");
+    if (ring && label) moveVisualTo({ circle: existing, ring, label }, star.x, star.y);
+    existing.classList.remove("bright", "soft", "dim", "faint");
+    existing.classList.add(star.brightness ?? "bright");
+    existing.classList.toggle("live", liveStarIds.has(star.id));
+    return existing;
+  }
+
+  if (existing) {
+    setCirclePosition(existing, star.x, star.y);
+    existing.setAttribute("class", remoteStarClass(star));
+    existing.querySelector("title")?.remove();
+    const title = document.createElementNS(SVG_NS, "title");
+    title.textContent = liveStarIds.has(star.id)
+      ? "A browser is looking at this sky now"
+      : "A star in the shared sky";
+    existing.appendChild(title);
+    return existing;
+  }
+
+  const circle = document.createElementNS(SVG_NS, "circle");
+  setCirclePosition(circle, star.x, star.y);
+  circle.setAttribute("r", "0.012");
+  circle.setAttribute("data-id", star.id);
+  circle.setAttribute("data-own", "false");
+  circle.setAttribute("class", remoteStarClass(star));
+  const title = document.createElementNS(SVG_NS, "title");
+  title.textContent = liveStarIds.has(star.id)
+    ? "A browser is looking at this sky now"
+    : "A star in the shared sky";
+  circle.appendChild(title);
+  svg.appendChild(circle);
+  updateCount();
+  return circle;
+}
+
+function updateLiveStatus(ids) {
+  liveStarIds = new Set(ids);
+  for (const circle of svg.querySelectorAll("circle[data-id]")) {
+    circle.classList.toggle("live", liveStarIds.has(circle.dataset.id));
+    if (circle.dataset.own !== "true") updateStarFromServer({
+      id: circle.dataset.id,
+      x: Number(circle.getAttribute("cx")),
+      y: Number(circle.getAttribute("cy")),
+      brightness: [...circle.classList].find((name) => ["bright", "soft", "dim", "faint"].includes(name)) ?? "bright",
+    });
+  }
+
+  if (!liveStatusEl) return;
+  const ownId = svg.querySelector('circle[data-own="true"]')?.dataset.id;
+  const others = [...liveStarIds].filter((id) => id !== ownId).length;
+  liveStatusEl.classList.toggle("connected", Boolean(ownId && liveStarIds.has(ownId)));
+  if (!ownId) {
+    liveStatusEl.textContent = "Place a star to join the live sky.";
+  } else if (!liveStarIds.has(ownId)) {
+    liveStatusEl.textContent = "Reconnecting to the sky…";
+  } else if (others === 0) {
+    liveStatusEl.textContent = "You are the only browser looking at the sky right now.";
+  } else {
+    liveStatusEl.textContent = `${others} other ${others === 1 ? "browser is" : "browsers are"} looking at the sky right now.`;
+  }
+}
+
+function startRealtime() {
+  realtime?.close();
+  realtime = new EventSource("/events");
+
+  realtime.addEventListener("sync", (event) => {
+    const data = JSON.parse(event.data);
+    updateLiveStatus(data.liveStarIds ?? []);
+    for (const star of data.stars ?? []) updateStarFromServer(star);
+    updateLiveStatus(data.liveStarIds ?? []);
+  });
+  realtime.addEventListener("star", (event) => {
+    const { star } = JSON.parse(event.data);
+    const circle = updateStarFromServer(star);
+    ringPulse(circle);
+  });
+  realtime.addEventListener("live", (event) => {
+    updateLiveStatus(JSON.parse(event.data).starIds ?? []);
+  });
+  realtime.addEventListener("error", () => {
+    if (liveStatusEl && document.body.dataset.hasStar === "true") {
+      liveStatusEl.classList.remove("connected");
+      liveStatusEl.textContent = "Reconnecting to the sky…";
+    }
+  });
 }
 
 function ringPulse(circle) {
@@ -203,6 +313,7 @@ async function placeStar(x, y) {
   updateCount();
   announce("Your star joined the sky.");
   placePrompt?.remove();
+  startRealtime();
 }
 
 async function reportHere() {
@@ -262,6 +373,7 @@ function localizeSinceDate() {
       wireDrag({ circle: ownCircle, ring, label });
     }
     reportHere();
+    startRealtime();
     return;
   }
 
