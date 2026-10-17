@@ -20,7 +20,7 @@ What the agent needs to carry from any of it is your call.
 - The app accepts no free text from visitors.
 - Before interpreting a live result, state local HEAD, deployed SHA if known, and whether the tree is clean.
 - Do not claim a visitor is physically present. For Crit 8, "last seen" means their last successful request to `/api/here`.
-- For Crit 9, a star is "live" only while at least one authenticated browser has an open `/events` connection. Say the star is "glowing" because a browser has the lounge open, never that a person is physically here.
+- For Crit 9, a star is glowing only while at least one authenticated browser has the lounge open in a visible tab. Never claim a person is physically here.
 - `/events` may hold temporary connection state in server memory, but it must never write that state to SQLite. A deploy or restart clears it and reconnecting browsers rebuild it.
 - Live events may expose only a star id, normalised coordinates, and a rough brightness bucket. They must never expose a cookie token, token hash, or anybody's exact timestamp.
 - A move made by one browser must reach another open browser through `/events` without a reload, within about one second; keep a check that proves it.
