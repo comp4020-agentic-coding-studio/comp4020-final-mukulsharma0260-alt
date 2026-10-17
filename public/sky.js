@@ -4,6 +4,7 @@ const countEl = document.getElementById("count");
 const liveStatusEl = document.getElementById("live-status");
 const placePrompt = document.getElementById("place-prompt");
 const placeButton = document.getElementById("place-star");
+const arrivalButton = document.getElementById("arrival-submit");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -12,6 +13,27 @@ const HOUR_MS = 60 * 60 * 1000;
 let statusTimer;
 let realtime;
 let liveStarIds = new Set();
+let skyActive = false;
+
+const ARRIVAL_KEY = "overlap-arrival-v2";
+
+function hasCheckedIn() {
+  try {
+    return window.localStorage.getItem(ARRIVAL_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function saveCheckIn() {
+  try {
+    // Browser-only arrival state. It deliberately does not create an account,
+    // server identity, or visible name.
+    window.localStorage.setItem(ARRIVAL_KEY, "entered");
+  } catch {
+    // A blocked localStorage must not prevent a visitor from using the sky.
+  }
+}
 function announce(text, { transient = true } = {}) {
   clearTimeout(statusTimer);
   statusEl.textContent = text;
@@ -45,7 +67,7 @@ function toSvgPoint(clientX, clientY) {
 function updateCount() {
   if (!countEl) return;
   const n = svg.querySelectorAll("circle[data-id]").length;
-  countEl.textContent = n === 1 ? "1 star" : `${n} stars`;
+  countEl.textContent = n === 0 ? "" : n === 1 ? "1 star" : `${n} stars`;
 }
 
 function starSelector(id) {
@@ -80,8 +102,8 @@ function updateStarFromServer(star) {
     existing.querySelector("title")?.remove();
     const title = document.createElementNS(SVG_NS, "title");
     title.textContent = liveStarIds.has(star.id)
-      ? "A browser is looking at this sky now"
-      : "A star in the shared sky";
+      ? "Glowing: a browser has this lounge open now"
+      : "A star in the lounge";
     existing.appendChild(title);
     return existing;
   }
@@ -94,8 +116,8 @@ function updateStarFromServer(star) {
   circle.setAttribute("class", remoteStarClass(star));
   const title = document.createElementNS(SVG_NS, "title");
   title.textContent = liveStarIds.has(star.id)
-    ? "A browser is looking at this sky now"
-    : "A star in the shared sky";
+    ? "Glowing: a browser has this lounge open now"
+    : "A star in the lounge";
   circle.appendChild(title);
   svg.appendChild(circle);
   updateCount();
@@ -121,14 +143,14 @@ function updateLiveStatus(ids) {
   if (!ownId) {
     const n = liveStarIds.size;
     liveStatusEl.textContent = n === 0
-      ? "Place a star to join the live sky."
-      : `${n} ${n === 1 ? "browser is" : "browsers are"} looking at the sky right now. Place a star to join.`;
+      ? "Place a star to join the lounge."
+      : `${n} ${n === 1 ? "star is" : "stars are"} glowing in the lounge now. Place a star to join.`;
   } else if (!liveStarIds.has(ownId)) {
-    liveStatusEl.textContent = "Reconnecting to the sky…";
+    liveStatusEl.textContent = "Reconnecting to the lounge…";
   } else if (others === 0) {
-    liveStatusEl.textContent = "You are the only browser looking at the sky right now.";
+    liveStatusEl.textContent = "Your star is the only one glowing right now.";
   } else {
-    liveStatusEl.textContent = `${others} other ${others === 1 ? "browser is" : "browsers are"} looking at the sky right now.`;
+    liveStatusEl.textContent = `${others} other ${others === 1 ? "star is" : "stars are"} glowing right now.`;
   }
 }
 
@@ -153,17 +175,27 @@ function startRealtime() {
   realtime.addEventListener("error", () => {
     if (liveStatusEl) {
       liveStatusEl.classList.remove("connected");
-      liveStatusEl.textContent = "Reconnecting to the sky…";
+      liveStatusEl.textContent = "Reconnecting to the lounge…";
     }
   });
 }
 
-// Live means an open AND visible tab (ADR 0005). A hidden tab drops its
-// stream, so its halo goes out on the server; showing the tab again
-// reconnects, gets a fresh snapshot, and checks in like a return visit.
+// Live means an open AND visible tab that has entered the lounge (ADRs 0005
+// and 0006). A hidden tab drops its stream, so its glow goes out on the
+// server; showing the tab again reconnects, gets a fresh snapshot, and checks
+// in like a return visit.
 function stopRealtime() {
   realtime?.close();
   realtime = undefined;
+}
+
+// The only way into the live stream and the /api/here check-in. It refuses
+// until the visitor has entered the lounge, and while the tab is hidden, so
+// no other code path can count someone as here early.
+function joinLounge({ checkIn = true } = {}) {
+  if (!skyActive || document.visibilityState === "hidden") return;
+  startRealtime();
+  if (checkIn) reportHere();
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -171,8 +203,7 @@ document.addEventListener("visibilitychange", () => {
     stopRealtime();
     return;
   }
-  startRealtime();
-  reportHere();
+  joinLounge();
 });
 
 function ringPulse(circle) {
@@ -331,9 +362,10 @@ async function placeStar(x, y) {
   wireDrag(parts);
   ringPulse(parts.circle);
   updateCount();
-  announce("Your star joined the sky.");
+  announce("Your star joined the lounge.");
   placePrompt?.remove();
-  startRealtime();
+  // Reconnect so the stream now carries this browser's own star as live.
+  joinLounge({ checkIn: false });
 }
 
 async function reportHere() {
@@ -380,13 +412,56 @@ function localizeSinceDate() {
   time.textContent = new Intl.DateTimeFormat("en-AU", { dateStyle: "long" }).format(new Date(iso));
 }
 
+// The arrival video is decoration, so it is the last thing to load: only
+// after the page itself has loaded, never under reduced motion, Save-Data or
+// a 2g connection, and never for a visitor who is already in the lounge.
+function arrivalVideoAllowed() {
+  if (reducedMotion) return false;
+  const connection = navigator.connection;
+  if (connection?.saveData === true) return false;
+  if (connection && ["slow-2g", "2g"].includes(connection.effectiveType)) return false;
+  return true;
+}
+
+function loadArrivalVideo() {
+  const video = document.querySelector(".arrival-video");
+  if (!video || skyActive || !arrivalVideoAllowed()) return;
+  // The poster is whichever galaxy WebP the still picture already loaded,
+  // so the video never fetches a second copy of the image.
+  const still = document.querySelector(".arrival-still img")?.currentSrc;
+  video.setAttribute("poster", still || video.dataset.poster);
+  for (const source of video.querySelectorAll("source[data-src]")) {
+    source.setAttribute("src", source.dataset.src);
+  }
+  video.muted = true;
+  video.addEventListener("playing", () => video.classList.add("playing"), { once: true });
+  video.load();
+  video.play()?.catch(() => {});
+}
+
+function stopArrivalVideo() {
+  const video = document.querySelector(".arrival-video");
+  if (video && !video.paused) video.pause();
+}
+
+function activateSky({ remember = false } = {}) {
+  if (skyActive) return;
+  if (remember) saveCheckIn();
+  skyActive = true;
+  stopArrivalVideo();
+  document.body.classList.add("entered");
+  document.getElementById("arrival")?.setAttribute("aria-hidden", "true");
+  document.getElementById("sky-app")?.setAttribute("aria-hidden", "false");
+  const heading = document.querySelector("#sky-app h1");
+  heading?.setAttribute("tabindex", "-1");
+  heading?.focus();
+
+  joinLounge({ checkIn: document.body.dataset.hasStar === "true" });
+}
+
 (function init() {
   localizeSinceDate();
   const hasStar = document.body.dataset.hasStar === "true";
-  const visible = document.visibilityState !== "hidden";
-
-  // Every viewer watches the live sky, with or without a star of their own.
-  if (visible) startRealtime();
 
   if (hasStar) {
     const ownCircle = svg.querySelector('circle[data-own="true"]');
@@ -396,17 +471,26 @@ function localizeSinceDate() {
       const label = group.querySelector(".star-you-label");
       wireDrag({ circle: ownCircle, ring, label });
     }
-    if (visible) reportHere();
-    return;
+  } else {
+    placeButton?.addEventListener("click", () => {
+      placeStar();
+    });
+
+    svg.addEventListener("click", (e) => {
+      if (document.body.dataset.hasStar === "true") return;
+      const { x, y } = toSvgPoint(e.clientX, e.clientY);
+      placeStar(x, y);
+    });
   }
 
-  placeButton?.addEventListener("click", () => {
-    placeStar();
+  arrivalButton?.addEventListener("click", () => activateSky({ remember: true }));
+  document.addEventListener("keydown", (e) => {
+    if (!skyActive && e.key === "Escape") activateSky({ remember: true });
   });
 
-  svg.addEventListener("click", (e) => {
-    if (document.body.dataset.hasStar === "true") return;
-    const { x, y } = toSvgPoint(e.clientX, e.clientY);
-    placeStar(x, y);
-  });
+  if (hasCheckedIn()) activateSky();
+  else arrivalButton?.focus();
+
+  if (document.readyState === "complete") loadArrivalVideo();
+  else window.addEventListener("load", loadArrivalVideo, { once: true });
 })();

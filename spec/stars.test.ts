@@ -61,6 +61,13 @@ it("repeated anonymous GET / creates no stars", async () => {
   expect(after).toBe(before);
 });
 
+it("GET / mints no identity cookie for a new visitor", async () => {
+  const res = await fetch(new URL("/", baseUrl));
+  expect(res.status).toBe(200);
+  expect(res.headers.get("set-cookie")).toBeNull();
+  await res.text();
+});
+
 it("GET / never advances last_seen_at", async () => {
   const identity = await createIdentity();
 

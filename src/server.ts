@@ -158,7 +158,7 @@ function identityFromRequest(req: IncomingMessage): { token: string; star: Star 
 function renderReadmePage(): string {
   const md = readFileSync(new URL("../README.md", import.meta.url), "utf8");
   const body = renderMarkdown(md);
-  return `<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>About Overlap</title><style>body{max-width:40rem;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5}</style></head><body><main>${body}</main><p><a href="/">Back to the sky</a></p></body></html>`;
+  return `<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>About Overlap</title><style>body{max-width:40rem;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5}</style></head><body><main>${body}</main><p><a href="/">Back to the lounge</a></p></body></html>`;
 }
 
 async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Promise<void> {
