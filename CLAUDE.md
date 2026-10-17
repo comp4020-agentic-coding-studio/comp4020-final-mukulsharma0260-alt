@@ -30,4 +30,11 @@ What the agent needs to carry from any of it is your call.
 - Presence lives in memory only, never in the database.
 - Every live event follows the same privacy rules as the page.
 - Never claim a person is physically present; live means an open, visible tab.
-- Every viewer gets live updates, with or without a star.
+- Every visitor who has entered gets live updates, with or without a star.
+- A visitor starts looking at the sky only after entering it; the arrival screen never opens the live stream or counts as glowing.
+- Any arrival-background lights are fixed atmosphere, never live-presence signals; only interactive sky stars represent visitors.
+- All visitor-facing wording follows `docs/terms.md`: the place is the **lounge**, a visitor's mark is a **star**, and **glowing** means a visitor has entered the lounge and has a visible tab. "Sky" may describe the picture, never name the place.
+
+A visitor counts as here only after entering the lounge; the arrival screen never opens the live stream or calls /api/here.
+
+The arrival artwork is a picture. Inside the lounge, every point of light is a visitor.
