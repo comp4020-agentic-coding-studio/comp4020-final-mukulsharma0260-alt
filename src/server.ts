@@ -28,6 +28,17 @@ const DB_PATH = process.env.DB_PATH ?? "/data/stars.db";
 const IS_PROD = process.env.NODE_ENV === "production";
 const MAX_BODY_BYTES = 10_000;
 
+// The arrival artwork, served from an explicit allowlist rather than a
+// directory, so a crafted path can never reach any other file. The PNG is
+// only the fallback for browsers without WebP.
+const ASSETS: Record<string, string> = {
+  "/assets/arrival-galaxy-960.webp": "image/webp",
+  "/assets/arrival-galaxy-1920.webp": "image/webp",
+  "/assets/arrival-galaxy-v3.png": "image/png",
+  "/assets/arrival-nebula-720.webm": "video/webm",
+  "/assets/arrival-nebula-720.mp4": "video/mp4",
+};
+
 const db = openDb(DB_PATH);
 
 // The night sky has two kinds of state. Stars belong in SQLite because they
@@ -291,13 +302,21 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && path === "/") {
       const identity = identityFromRequest(req);
       const stars = listAll(db);
-      sendHtml(res, 200, renderHomePage(stars, identity?.star.id));
+      sendHtml(res, 200, renderHomePage(stars, identity?.star.id, new Date()));
     } else if (req.method === "GET" && path === "/readme/") {
       sendHtml(res, 200, renderReadmePage());
     } else if (req.method === "GET" && path === "/sky.js") {
       const js = readFileSync(new URL("../public/sky.js", import.meta.url), "utf8");
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       res.end(js);
+    } else if (req.method === "GET" && Object.hasOwn(ASSETS, path)) {
+      const asset = readFileSync(new URL(`../public${path}`, import.meta.url));
+      res.writeHead(200, {
+        "Content-Type": ASSETS[path]!,
+        "Content-Length": asset.length,
+        "Cache-Control": "public, max-age=31536000, immutable",
+      });
+      res.end(asset);
     } else if (req.method === "GET" && path === "/events") {
       handleEvents(req, res);
     } else if (req.method === "POST" && path.startsWith("/api/") && !isSameOrigin(req)) {

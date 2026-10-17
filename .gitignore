@@ -8,6 +8,10 @@ screenshots/
 # local SQLite DB (production data lives on the Fly volume, not in git)
 data/
 
+# source and superseded artwork, kept locally but never shipped: it lives
+# outside public/ so neither git nor a manual Fly deploy can pick it up
+assets-src/
+
 # editor and OS junk
 .DS_Store
 ._*
