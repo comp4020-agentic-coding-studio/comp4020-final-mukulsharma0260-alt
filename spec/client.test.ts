@@ -134,9 +134,14 @@ it("uses a no-input anonymous arrival and lets Escape enter the sky", async () =
 });
 
 it("closes the stream when the tab is hidden and reopens it, checking in, when visible", async () => {
-  const sky = await loadSky();
+  // A check-in is for a visitor with a star; one without is covered by
+  // "a visitor with no star never calls /api/here".
+  const res = await fetch(new URL("/api/star", baseUrl), { method: "POST", body: "{}" });
+  const cookie = res.headers.get("set-cookie")!.split(";")[0]!;
+  const sky = await loadSky({ cookie });
   try {
     expect(sky.open()).toHaveLength(1);
+    const checkInsOnEntry = sky.posts.filter((p) => p === "/api/here").length;
 
     sky.setVisibility("hidden");
     expect(sky.open()).toHaveLength(0);
@@ -144,7 +149,7 @@ it("closes the stream when the tab is hidden and reopens it, checking in, when v
     sky.setVisibility("visible");
     expect(sky.open()).toHaveLength(1);
     expect(sky.sources).toHaveLength(2);
-    expect(sky.posts).toContain("/api/here");
+    expect(sky.posts.filter((p) => p === "/api/here")).toHaveLength(checkInsOnEntry + 1);
   } finally {
     sky.close();
   }
@@ -233,6 +238,31 @@ it("placing a star before entering opens no live stream and does not check in", 
     sky.window.document.getElementById("place-star")?.dispatchEvent(new sky.window.MouseEvent("click", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(sky.open()).toHaveLength(0);
+    expect(sky.posts).not.toContain("/api/here");
+  } finally {
+    sky.close();
+  }
+});
+
+it("a visitor with no star never calls /api/here, on entry or on returning to the tab", async () => {
+  const sky = await loadSky({ checkedIn: false });
+  try {
+    sky.checkIn();
+    sky.setVisibility("hidden");
+    sky.setVisibility("visible");
+    expect(sky.open()).toHaveLength(1);
+    expect(sky.posts).not.toContain("/api/here");
+  } finally {
+    sky.close();
+  }
+});
+
+it("reportHere refuses before entry, even when called directly", async () => {
+  const res = await fetch(new URL("/api/star", baseUrl), { method: "POST", body: "{}" });
+  const cookie = res.headers.get("set-cookie")!.split(";")[0]!;
+  const sky = await loadSky({ cookie, checkedIn: false });
+  try {
+    await sky.window.eval("reportHere()");
     expect(sky.posts).not.toContain("/api/here");
   } finally {
     sky.close();

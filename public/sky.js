@@ -368,7 +368,11 @@ async function placeStar(x, y) {
   joinLounge({ checkIn: false });
 }
 
+// A check-in counts this browser's own star as seen, so it is only for a
+// visitor who has entered the lounge and has a star. It guards itself rather
+// than trusting every caller to.
 async function reportHere() {
+  if (!skyActive || document.body.dataset.hasStar !== "true") return;
   const res = await fetch("/api/here", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
