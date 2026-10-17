@@ -64,80 +64,146 @@ function toSvgPoint(clientX, clientY) {
   };
 }
 
+// ---- Stars ---------------------------------------------------------------
+// Every star is one <g data-id> placed with a transform, so a move is one
+// attribute and glides with one CSS transition. Inside it: a soft glow and a
+// warm-white core whose size and glow follow old light, plus, while the star
+// is glowing, a pale-blue halo and a breathing ring. The viewer's own star
+// adds a thin ivory ring and a "you" label.
+
+// Core radius and glow radius for each old-light level, at full size.
+const STAR_LIGHT = {
+  bright: { core: 0.0105, glow: 0.034 },
+  soft: { core: 0.0085, glow: 0.026 },
+  dim: { core: 0.0066, glow: 0.018 },
+  faint: { core: 0.005, glow: 0.011 },
+};
+const LEVELS = Object.keys(STAR_LIGHT);
+
+// Stars shrink gently as the lounge fills: full size up to 20, easing down
+// to 60% at 150 and holding there.
+function crowdScale(n) {
+  if (n <= 20) return 1;
+  if (n >= 150) return 0.6;
+  return 1 - 0.4 * ((n - 20) / 130);
+}
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  return el;
+}
+
+function starTitle(star, own) {
+  if (own) return "Your star";
+  return liveStarIds.has(star.id) ? "Glowing: a browser has this lounge open now" : "A star in the lounge";
+}
+
+function ownStarId() {
+  return svg.querySelector('g.star[data-own="true"]')?.dataset.id;
+}
+
+// Draws (or redraws) one star's group in place. `scale` is the crowd scale.
+function drawStar(star, scale) {
+  let g = svg.querySelector(starSelector(star.id));
+  // Ownership is decided on every draw, not just when the group is made:
+  // the live broadcast of a visitor's own new star can arrive before their
+  // own placement reply, creating the group as someone else's first.
+  const own = star.own ?? g?.dataset.own === "true";
+  if (!g) {
+    g = svgEl("g", { class: "star", "data-id": star.id });
+    svg.appendChild(g);
+  }
+  g.dataset.own = own ? "true" : "false";
+  const level = LEVELS.includes(star.brightness) ? star.brightness : "bright";
+  const live = liveStarIds.has(star.id);
+  const light = STAR_LIGHT[level];
+  const core = (own ? Math.max(light.core, STAR_LIGHT.soft.core) : light.core) * scale;
+  const glow = light.glow * scale;
+
+  g.setAttribute("class", `star ${level}${live ? " live" : ""}${own ? " own" : ""}`);
+  g.dataset.brightness = level;
+  g.setAttribute("transform", `translate(${star.x} ${star.y})`);
+  g.dataset.x = String(star.x);
+  g.dataset.y = String(star.y);
+
+  g.replaceChildren();
+  if (live) {
+    g.append(svgEl("circle", { class: "star-halo", r: (glow * 1.6).toFixed(5) }));
+    g.append(svgEl("circle", { class: "star-breath", r: (core * 2.4).toFixed(5) }));
+  }
+  g.append(svgEl("circle", { class: "star-glow", r: glow.toFixed(5) }));
+  g.append(svgEl("circle", { class: "star-core", r: core.toFixed(5), "data-id": star.id }));
+  if (own) {
+    g.append(svgEl("circle", { class: "star-ring", r: (core * 2.1).toFixed(5) }));
+    const label = svgEl("text", { class: "star-you-label", y: (-core * 2.1 - 0.014).toFixed(5), "text-anchor": "middle" });
+    label.textContent = "you";
+    g.append(label);
+    g.setAttribute("tabindex", "0");
+    g.setAttribute("role", "button");
+    g.setAttribute("aria-label", "Your star. Drag or use arrow keys to move it. Hold Shift for a bigger step.");
+  }
+  const title = svgEl("title", {});
+  title.textContent = starTitle(star, own);
+  g.append(title);
+  return g;
+}
+
+function allStars() {
+  return [...svg.querySelectorAll("g.star[data-id]")].map((g) => ({
+    id: g.dataset.id,
+    x: Number(g.dataset.x),
+    y: Number(g.dataset.y),
+    brightness: g.dataset.brightness,
+    own: g.dataset.own === "true",
+  }));
+}
+
+// Redraw every star at the scale for how full the lounge now is.
+function redrawStars() {
+  const stars = allStars();
+  const scale = crowdScale(stars.length);
+  for (const s of stars) drawStar(s, scale);
+  updateCount();
+}
+
+// A sync replaces the lounge: draw exactly its stars, and remove any others.
+function replaceStars(stars) {
+  const keep = new Set(stars.map((s) => s.id));
+  for (const g of svg.querySelectorAll("g.star[data-id]")) {
+    if (!keep.has(g.dataset.id)) g.remove();
+  }
+  const scale = crowdScale(stars.length);
+  for (const s of stars) drawStar(s, scale);
+  wireOwnStar();
+  updateCount();
+}
+
+// A single change (placed or moved): draw that star; if the count changed,
+// the crowd scale did too, so redraw the rest.
+function updateStarFromServer(star) {
+  const isNew = !svg.querySelector(starSelector(star.id));
+  const g = drawStar(star, crowdScale(svg.querySelectorAll("g.star[data-id]").length + (isNew ? 1 : 0)));
+  if (isNew) redrawStars();
+  return g;
+}
+
 function updateCount() {
   if (!countEl) return;
-  const n = svg.querySelectorAll("circle[data-id]").length;
+  const n = svg.querySelectorAll("g.star[data-id]").length;
   countEl.textContent = n === 0 ? "" : n === 1 ? "1 star" : `${n} stars`;
 }
 
 function starSelector(id) {
-  return `circle[data-id="${CSS.escape(id)}"]`;
-}
-
-function setCirclePosition(circle, x, y) {
-  circle.setAttribute("cx", String(x));
-  circle.setAttribute("cy", String(y));
-}
-
-function remoteStarClass(star) {
-  return `star ${star.brightness ?? "bright"}${liveStarIds.has(star.id) ? " live" : ""}`;
-}
-
-function updateStarFromServer(star) {
-  const existing = svg.querySelector(starSelector(star.id));
-  if (existing?.dataset.own === "true") {
-    const group = existing.closest("g.own-star-group");
-    const ring = group?.querySelector(".star-ring");
-    const label = group?.querySelector(".star-you-label");
-    if (ring && label) moveVisualTo({ circle: existing, ring, label }, star.x, star.y);
-    existing.classList.remove("bright", "soft", "dim", "faint");
-    existing.classList.add(star.brightness ?? "bright");
-    existing.classList.toggle("live", liveStarIds.has(star.id));
-    return existing;
-  }
-
-  if (existing) {
-    setCirclePosition(existing, star.x, star.y);
-    existing.setAttribute("class", remoteStarClass(star));
-    existing.querySelector("title")?.remove();
-    const title = document.createElementNS(SVG_NS, "title");
-    title.textContent = liveStarIds.has(star.id)
-      ? "Glowing: a browser has this lounge open now"
-      : "A star in the lounge";
-    existing.appendChild(title);
-    return existing;
-  }
-
-  const circle = document.createElementNS(SVG_NS, "circle");
-  setCirclePosition(circle, star.x, star.y);
-  circle.setAttribute("r", "0.012");
-  circle.setAttribute("data-id", star.id);
-  circle.setAttribute("data-own", "false");
-  circle.setAttribute("class", remoteStarClass(star));
-  const title = document.createElementNS(SVG_NS, "title");
-  title.textContent = liveStarIds.has(star.id)
-    ? "Glowing: a browser has this lounge open now"
-    : "A star in the lounge";
-  circle.appendChild(title);
-  svg.appendChild(circle);
-  updateCount();
-  return circle;
+  return `g.star[data-id="${CSS.escape(id)}"]`;
 }
 
 function updateLiveStatus(ids) {
   liveStarIds = new Set(ids);
-  for (const circle of svg.querySelectorAll("circle[data-id]")) {
-    circle.classList.toggle("live", liveStarIds.has(circle.dataset.id));
-    if (circle.dataset.own !== "true") updateStarFromServer({
-      id: circle.dataset.id,
-      x: Number(circle.getAttribute("cx")),
-      y: Number(circle.getAttribute("cy")),
-      brightness: [...circle.classList].find((name) => ["bright", "soft", "dim", "faint"].includes(name)) ?? "bright",
-    });
-  }
+  redrawStars();
 
   if (!liveStatusEl) return;
-  const ownId = svg.querySelector('circle[data-own="true"]')?.dataset.id;
+  const ownId = ownStarId();
   const others = [...liveStarIds].filter((id) => id !== ownId).length;
   liveStatusEl.classList.toggle("connected", Boolean(ownId && liveStarIds.has(ownId)));
   if (!ownId) {
@@ -154,20 +220,21 @@ function updateLiveStatus(ids) {
   }
 }
 
+
 function startRealtime() {
   realtime?.close();
   realtime = new EventSource("/events");
 
   realtime.addEventListener("sync", (event) => {
+    // A sync replaces the lounge: exactly its stars, and no stale ones.
     const data = JSON.parse(event.data);
-    updateLiveStatus(data.liveStarIds ?? []);
-    for (const star of data.stars ?? []) updateStarFromServer(star);
+    liveStarIds = new Set(data.liveStarIds ?? []);
+    replaceStars(data.stars ?? []);
     updateLiveStatus(data.liveStarIds ?? []);
   });
   realtime.addEventListener("star", (event) => {
     const { star } = JSON.parse(event.data);
-    const circle = updateStarFromServer(star);
-    ringPulse(circle);
+    ringPulse(updateStarFromServer(star));
   });
   realtime.addEventListener("live", (event) => {
     updateLiveStatus(JSON.parse(event.data).starIds ?? []);
@@ -206,10 +273,10 @@ document.addEventListener("visibilitychange", () => {
   joinLounge();
 });
 
-function ringPulse(circle) {
-  if (reducedMotion) return;
-  circle.classList.add("new-ring");
-  setTimeout(() => circle.classList.remove("new-ring"), 1600);
+function ringPulse(g) {
+  if (reducedMotion || !g) return;
+  g.classList.add("new-ring");
+  setTimeout(() => g.classList.remove("new-ring"), 1600);
 }
 
 function relativeTime(iso) {
@@ -223,38 +290,6 @@ function relativeTime(iso) {
   if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
   const weeks = Math.round(days / 7);
   return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
-}
-
-function makeOwnStarGroup(star) {
-  const group = document.createElementNS(SVG_NS, "g");
-  group.setAttribute("class", "own-star-group");
-
-  const ring = document.createElementNS(SVG_NS, "circle");
-  ring.setAttribute("class", "star-ring");
-  ring.setAttribute("cx", String(star.x));
-  ring.setAttribute("cy", String(star.y));
-  ring.setAttribute("r", "0.026");
-
-  const circle = document.createElementNS(SVG_NS, "circle");
-  circle.setAttribute("cx", String(star.x));
-  circle.setAttribute("cy", String(star.y));
-  circle.setAttribute("r", "0.017");
-  circle.setAttribute("data-id", star.id);
-  circle.setAttribute("data-own", "true");
-  circle.setAttribute("class", "star bright own");
-  circle.setAttribute("tabindex", "0");
-  circle.setAttribute("role", "button");
-  circle.setAttribute("aria-label", "Your star. Drag or use arrow keys to move it. Hold Shift for a bigger step.");
-
-  const label = document.createElementNS(SVG_NS, "text");
-  label.setAttribute("class", "star-you-label");
-  label.setAttribute("x", String(star.x));
-  label.setAttribute("y", String(star.y - 0.042));
-  label.setAttribute("text-anchor", "middle");
-  label.textContent = "you";
-
-  group.append(ring, circle, label);
-  return { group, ring, circle, label };
 }
 
 let saveTimer;
@@ -271,38 +306,46 @@ function saveMove(x, y) {
   }, 300);
 }
 
-function moveVisualTo(parts, x, y) {
-  parts.ring.setAttribute("cx", String(x));
-  parts.ring.setAttribute("cy", String(y));
-  parts.circle.setAttribute("cx", String(x));
-  parts.circle.setAttribute("cy", String(y));
-  parts.label.setAttribute("x", String(x));
-  parts.label.setAttribute("y", String(y - 0.042));
+// Move the viewer's own star locally (no glide while dragging: it follows the
+// pointer), keeping its stored position in step for the next redraw.
+function moveOwnStar(g, x, y) {
+  g.dataset.x = String(x);
+  g.dataset.y = String(y);
+  g.setAttribute("transform", `translate(${x} ${y})`);
 }
 
-function wireDrag(parts) {
-  const { circle } = parts;
+// Pointer, touch and keyboard moving for the viewer's own star. Listeners
+// live on the svg and find the own star each time, because a redraw replaces
+// its children but keeps the group.
+let ownStarWired = false;
+function wireOwnStar() {
+  if (ownStarWired) return;
+  ownStarWired = true;
   let dragging = false;
+  const own = () => svg.querySelector('g.star[data-own="true"]');
 
-  circle.addEventListener("pointerdown", (e) => {
+  svg.addEventListener("pointerdown", (e) => {
+    const g = own();
+    if (!g || !g.contains(e.target)) return;
     dragging = true;
-    circle.setPointerCapture(e.pointerId);
-    circle.classList.add("dragging");
+    svg.setPointerCapture?.(e.pointerId);
+    g.classList.add("dragging");
   });
 
-  circle.addEventListener("pointermove", (e) => {
+  svg.addEventListener("pointermove", (e) => {
     if (!dragging) return;
     const { x, y } = toSvgPoint(e.clientX, e.clientY);
-    moveVisualTo(parts, x, y);
+    moveOwnStar(own(), x, y);
     saveMove(x, y);
   });
 
   function endDrag() {
     if (!dragging) return;
     dragging = false;
-    circle.classList.remove("dragging");
-    const x = Number(circle.getAttribute("cx"));
-    const y = Number(circle.getAttribute("cy"));
+    const g = own();
+    g.classList.remove("dragging");
+    const x = Number(g.dataset.x);
+    const y = Number(g.dataset.y);
     clearTimeout(saveTimer);
     fetch("/api/star/move", {
       method: "POST",
@@ -318,20 +361,22 @@ function wireDrag(parts) {
       });
   }
 
-  circle.addEventListener("pointerup", endDrag);
-  circle.addEventListener("pointercancel", endDrag);
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", endDrag);
 
-  circle.addEventListener("keydown", (e) => {
+  svg.addEventListener("keydown", (e) => {
+    const g = own();
+    if (!g || e.target !== g) return;
     const step = e.shiftKey ? 0.1 : 0.02;
-    let x = Number(circle.getAttribute("cx"));
-    let y = Number(circle.getAttribute("cy"));
+    let x = Number(g.dataset.x);
+    let y = Number(g.dataset.y);
     if (e.key === "ArrowLeft") x = clamp01(x - step);
     else if (e.key === "ArrowRight") x = clamp01(x + step);
     else if (e.key === "ArrowUp") y = clamp01(y - step);
     else if (e.key === "ArrowDown") y = clamp01(y + step);
     else return;
     e.preventDefault();
-    moveVisualTo(parts, x, y);
+    moveOwnStar(g, x, y);
     saveMove(x, y);
     announce("Star moved.");
   });
@@ -357,13 +402,13 @@ async function placeStar(x, y) {
   const { star } = await res.json();
 
   document.body.dataset.hasStar = "true";
-  const parts = makeOwnStarGroup(star);
-  svg.appendChild(parts.group);
-  wireDrag(parts);
-  ringPulse(parts.circle);
-  updateCount();
+  // A just-placed star is bright: it was seen this moment.
+  const g = updateStarFromServer({ id: star.id, x: star.x, y: star.y, brightness: "bright", own: true });
+  wireOwnStar();
+  ringPulse(g);
   announce("Your star joined the lounge.");
   placePrompt?.remove();
+  g.focus();
   // Reconnect so the stream now carries this browser's own star as live.
   joinLounge({ checkIn: false });
 }
@@ -397,14 +442,14 @@ async function reportHere() {
   }
 
   for (const id of data.newStarIds ?? []) {
-    const circle = svg.querySelector(`circle[data-id="${CSS.escape(id)}"]`);
-    if (circle) ringPulse(circle);
+    ringPulse(svg.querySelector(starSelector(id)));
   }
 
-  const ownCircle = svg.querySelector('circle[data-own="true"]');
-  if (ownCircle) {
-    ownCircle.classList.remove("soft", "dim", "faint");
-    ownCircle.classList.add("bright");
+  // Checking in brightens the viewer's own star: it was seen just now.
+  const own = svg.querySelector('g.star[data-own="true"]');
+  if (own) {
+    own.dataset.brightness = "bright";
+    redrawStars();
   }
 }
 
@@ -793,9 +838,11 @@ function activateSky({ remember = false } = {}) {
   document.body.classList.add("entered");
   document.getElementById("arrival")?.setAttribute("aria-hidden", "true");
   document.getElementById("sky-app")?.setAttribute("aria-hidden", "false");
-  const heading = document.querySelector("#sky-app h1");
-  heading?.setAttribute("tabindex", "-1");
-  heading?.focus();
+  // Focus goes to something the visitor can act on: their own star, or the
+  // place button if they have none. Never the heading.
+  const target = svg.querySelector('g.star[data-own="true"]') ?? placeButton;
+  target?.focus();
+  announce("You've entered the lounge.");
 
   joinLounge({ checkIn: document.body.dataset.hasStar === "true" });
 }
@@ -805,13 +852,7 @@ function activateSky({ remember = false } = {}) {
   const hasStar = document.body.dataset.hasStar === "true";
 
   if (hasStar) {
-    const ownCircle = svg.querySelector('circle[data-own="true"]');
-    const group = ownCircle?.closest("g.own-star-group");
-    if (ownCircle && group) {
-      const ring = group.querySelector(".star-ring");
-      const label = group.querySelector(".star-you-label");
-      wireDrag({ circle: ownCircle, ring, label });
-    }
+    wireOwnStar();
   } else {
     placeButton?.addEventListener("click", () => {
       placeStar();

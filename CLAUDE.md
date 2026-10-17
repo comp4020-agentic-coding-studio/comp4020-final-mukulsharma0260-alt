@@ -39,3 +39,5 @@ No media file without its source and licence recorded in docs/credits.md; nothin
 A visitor counts as here only after entering the lounge; the arrival screen never opens the live stream or calls /api/here.
 
 The arrival artwork is a picture. Inside the lounge, every point of light is a visitor.
+
+The lounge backdrop is the arrival galaxy blurred until no point of light remains.

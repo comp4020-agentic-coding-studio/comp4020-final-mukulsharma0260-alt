@@ -17,22 +17,41 @@ export function formatDateInZone(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat("en-AU", { dateStyle: "long", timeZone }).format(new Date(iso));
 }
 
-function renderStar(star: Star, viewerStarId: string | undefined, now: Date): string {
-  const brightness = oldLight(new Date(star.lastSeenAt), now);
-  const isOwn = star.id === viewerStarId;
+// Core and glow radius for each old-light level at full size. public/sky.js
+// draws stars with the same table once the live stream connects; this is
+// only the first paint, so the two must agree.
+const STAR_LIGHT: Record<string, { core: number; glow: number }> = {
+  bright: { core: 0.0105, glow: 0.034 },
+  soft: { core: 0.0085, glow: 0.026 },
+  dim: { core: 0.0066, glow: 0.018 },
+  faint: { core: 0.005, glow: 0.011 },
+};
 
-  if (!isOwn) {
+// Stars shrink gently as the lounge fills: full size up to 20, 60% at 150.
+export function crowdScale(n: number): number {
+  if (n <= 20) return 1;
+  if (n >= 150) return 0.6;
+  return 1 - 0.4 * ((n - 20) / 130);
+}
+
+function renderStar(star: Star, viewerStarId: string | undefined, now: Date, scale: number): string {
+  const level = oldLight(new Date(star.lastSeenAt), now);
+  const own = star.id === viewerStarId;
+  const light = STAR_LIGHT[level]!;
+  const core = (own ? Math.max(light.core, STAR_LIGHT.soft!.core) : light.core) * scale;
+  const glow = light.glow * scale;
+  const id = escapeAttr(star.id);
+  const place = `transform="translate(${star.x} ${star.y})" data-x="${star.x}" data-y="${star.y}" data-brightness="${level}"`;
+
+  if (!own) {
+    // Rough recency only, never an exact time.
     const label = recencyText(new Date(star.lastSeenAt), now);
-    return `<circle class="star ${brightness}" cx="${star.x}" cy="${star.y}" r="0.012" data-id="${escapeAttr(star.id)}" data-own="false"><title>${escapeHtml(label)}</title></circle>`;
+    return `<g class="star ${level}" data-id="${id}" data-own="false" ${place}><circle class="star-glow" r="${glow.toFixed(5)}"></circle><circle class="star-core" r="${core.toFixed(5)}" data-id="${id}"></circle><title>${escapeHtml(label)}</title></g>`;
   }
 
-  // The viewer's own star is marked with a ring and a short text label, not
+  // The viewer's own star is marked with a thin ring and a "you" label, not
   // colour alone, so it is still distinguishable without colour vision.
-  return `<g class="own-star-group">
-    <circle class="star-ring" cx="${star.x}" cy="${star.y}" r="0.026"></circle>
-    <circle class="star ${brightness} own" cx="${star.x}" cy="${star.y}" r="0.017" data-id="${escapeAttr(star.id)}" data-own="true" tabindex="0" role="button" aria-label="Your star. Drag or use arrow keys to move it. Hold Shift for a bigger step."><title>This is your star</title></circle>
-    <text class="star-you-label" x="${star.x}" y="${star.y - 0.042}" text-anchor="middle">you</text>
-  </g>`;
+  return `<g class="star ${level} own" data-id="${id}" data-own="true" ${place} tabindex="0" role="button" aria-label="Your star. Drag or use arrow keys to move it. Hold Shift for a bigger step."><circle class="star-glow" r="${glow.toFixed(5)}"></circle><circle class="star-core" r="${core.toFixed(5)}" data-id="${id}"></circle><circle class="star-ring" r="${(core * 2.1).toFixed(5)}"></circle><text class="star-you-label" y="${(-core * 2.1 - 0.014).toFixed(5)}" text-anchor="middle">you</text><title>Your star</title></g>`;
 }
 
 const LEGEND_LEVELS: Array<{ cls: string }> = [
@@ -44,7 +63,7 @@ const LEGEND_LEVELS: Array<{ cls: string }> = [
 
 function renderLegend(): string {
   const dots = LEGEND_LEVELS.map(
-    (l, i) => `<circle class="legend-dot ${l.cls}" cx="${8 + i * 16}" cy="8" r="5"></circle>`,
+    (l, i) => `<circle class="legend-dot ${l.cls}" cx="${8 + i * 16}" cy="8" r="${(STAR_LIGHT[l.cls]!.core / STAR_LIGHT.bright!.core * 4.5).toFixed(2)}"></circle>`,
   ).join("");
   return `<div id="legend">
     <svg width="72" height="16" viewBox="0 0 72 16" aria-hidden="true" focusable="false">${dots}</svg>
@@ -57,7 +76,8 @@ export function renderHomePage(
   viewerStarId: string | undefined,
   now: Date = new Date(),
 ): string {
-  const circles = stars.map((s) => renderStar(s, viewerStarId, now)).join("\n");
+  const scale = crowdScale(stars.length);
+  const circles = stars.map((s) => renderStar(s, viewerStarId, now, scale)).join("\n");
   const count = stars.length;
   const countText = count === 1 ? "1 star" : `${count} stars`;
   const ownStar = viewerStarId ? stars.find((s) => s.id === viewerStarId) : undefined;
@@ -72,7 +92,7 @@ export function renderHomePage(
 
   const placePrompt = !ownStar
     ? `<div id="place-prompt">
-        <button id="place-star" type="button">Place your star</button>
+        <button id="place-star" class="lounge-button" type="button">Place your star</button>
         <p id="place-hint">Tap or click anywhere in the sky to place your star there, or use the button.</p>
       </div>`
     : "";
@@ -109,8 +129,19 @@ export function renderHomePage(
       radial-gradient(ellipse 90% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.5) 100%),
       var(--void);
   }
-  main { max-width: 42rem; margin: 0 auto; padding: 1.5rem; }
-  h1 { font-size: 1.4rem; }
+  /* The lounge's one centred column. It spans the viewport and centres its
+     content; nothing in it may push the page sideways on a phone. */
+  main {
+    position: relative;
+    z-index: 1;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 42rem;
+    margin: 0 auto;
+    padding: 1.75rem 1rem 2rem;
+    text-align: center;
+  }
+  html, body { overflow-x: hidden; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
   /* The arrival film is atmosphere only. It has no sound; real visitors
@@ -167,7 +198,8 @@ export function renderHomePage(
   .arrival-kicker { margin: 0 0 1rem; color: var(--blue-fire); font: 600 clamp(0.66rem, 1.8vw, 0.78rem) ui-monospace, "Courier New", monospace; letter-spacing: 0.16em; }
   #arrival-title { margin: 0; color: var(--ivory); font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; font-size: clamp(2.7rem, 8vw, 5rem); font-weight: 700; line-height: 0.94; letter-spacing: -0.025em; text-shadow: 0 2px 22px rgba(0, 0, 0, 0.88); }
   .arrival-copy { max-width: 34rem; margin: 1.25rem auto 0; color: #f2f2f3; font: clamp(0.9rem, 2.5vw, 1.05rem)/1.55 system-ui, sans-serif; }
-  #arrival-submit {
+  /* One button style for the arrival and the lounge. */
+  #arrival-submit, .lounge-button {
     border: 1px solid #ffffff;
     border-radius: 0.15rem;
     padding: 0.82rem 1.15rem;
@@ -178,18 +210,19 @@ export function renderHomePage(
     letter-spacing: 0.08em;
     cursor: pointer;
     text-transform: uppercase;
-    transform: translateY(clamp(4rem, 15vh, 8.5rem));
   }
-  #arrival-submit:hover { color: #050506; background: #ffffff; border-color: #ffffff; }
+  /* Only the arrival button sits lower, towards the horizon. */
+  #arrival-submit { transform: translateY(clamp(4rem, 15vh, 8.5rem)); }
+  #arrival-submit:hover, .lounge-button:hover { color: #050506; background: #ffffff; border-color: #ffffff; }
   /* Keyboard focus is always visible: a soft ivory ring rather than a hard
      white box, so it reads as part of the scene. */
-  #arrival-submit:focus-visible {
+  #arrival-submit:focus-visible, .lounge-button:focus-visible {
     color: #050506;
     background: #ffffff;
     border-color: #ffffff;
     outline: 2px solid rgba(250, 244, 230, 0.85);
-    outline-offset: 5px;
-    box-shadow: 0 0 0 7px rgba(250, 244, 230, 0.14), 0 0 22px rgba(250, 244, 230, 0.28);
+    outline-offset: 3px;
+    box-shadow: 0 0 16px rgba(250, 244, 230, 0.22);
   }
   /* The arrival film. It fills the whole viewport: the layer is fixed to it
      and the canvas is absolutely positioned inside, with no pixel sizes,
@@ -274,12 +307,6 @@ export function renderHomePage(
     #film-skip { top: 1rem; right: auto; bottom: auto; left: 1rem; }
   }
   .film-pill:focus-visible { outline: 2px solid rgba(250, 244, 230, 0.9); outline-offset: 2px; }
-  #sky-app h1:focus-visible {
-    outline: 2px solid rgba(250, 244, 230, 0.7);
-    outline-offset: 6px;
-    border-radius: 0.2rem;
-    box-shadow: 0 0 18px rgba(250, 244, 230, 0.18);
-  }
   body.entered #arrival { visibility: hidden; opacity: 0; pointer-events: none; }
   body:not(.entered) #sky-app { visibility: hidden; opacity: 0; transform: scale(0.985); }
   #sky-app { transition: opacity 600ms ease, transform 600ms ease; }
@@ -305,9 +332,44 @@ export function renderHomePage(
     }
   }
 
-  #place-prompt { text-align: center; margin: 0.75rem 0; }
-  #place-star { background: var(--gold); color: #050506; border: none; border-radius: 0.3rem; padding: 0.5rem 1.1rem; font-size: 1rem; cursor: pointer; }
-  #place-hint { color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 0; }
+  /* The lounge backdrop: the arrival galaxy, blurred until no point of light
+     remains and darkened, with the planet horizon still along the bottom.
+     Only real visitors are points of light in the lounge. */
+  .lounge-backdrop {
+    position: fixed;
+    z-index: 0;
+    /* Overhang the top and sides so the blur has no hard edge, but sit flush
+       on the bottom: the planet horizon is at the bottom of the image. */
+    inset: -60px -60px 0;
+    pointer-events: none;
+    background:
+      url("/assets/arrival-galaxy-960.webp") 50% 100% / max(100%, 150vh) auto no-repeat,
+      #060818;
+    filter: blur(28px) brightness(0.36) saturate(1.1);
+    opacity: 0;
+  }
+  body.entered .lounge-backdrop { opacity: 1; }
+
+  .lounge-header { margin: 0 0 1.25rem; }
+  .lounge-kicker {
+    margin: 0 0 0.6rem;
+    color: var(--blue-fire);
+    font: 600 0.68rem ui-monospace, "Courier New", monospace;
+    letter-spacing: 0.16em;
+  }
+  /* A small serif title, the arrival's voice; no box or border. */
+  #sky-app h1 {
+    margin: 0;
+    color: var(--ivory);
+    font: 700 1.35rem/1.2 "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    letter-spacing: 0.01em;
+    border: 0;
+    outline: none;
+  }
+  .lounge-intro { max-width: 30rem; margin: 0.45rem auto 0; color: #e6e7ee; font-size: 0.95rem; line-height: 1.5; }
+
+  #place-prompt { margin: 0.9rem 0 0.5rem; }
+  #place-hint { color: var(--muted); font-size: 0.82rem; margin: 0.6rem 0 0; }
 
   #sky-wrap {
     position: relative;
@@ -319,29 +381,46 @@ export function renderHomePage(
   }
   svg#sky { width: 100%; height: 100%; display: block; overflow: visible; }
 
-  .star { fill: #fff9eb; cursor: grab; }
-  .star.bright { fill: #ffffff; filter: drop-shadow(0 0 0.008 #ffffff) drop-shadow(0 0 0.026 rgba(255, 255, 255, 0.55)); }
-  .star.soft   { fill: #dedee3; opacity: 0.88; filter: drop-shadow(0 0 0.014 rgba(222, 222, 227, 0.35)); }
-  .star.dim    { fill: #a4a4ad; opacity: 0.62; filter: drop-shadow(0 0 0.006 rgba(164, 164, 173, 0.22)); }
-  .star.faint  { fill: #71717b; opacity: 0.5; }
+  /* Stars: a warm-white core with a soft glow. Old light changes the core
+     size (set in markup) and how strongly it glows. */
+  .star { cursor: default; }
+  .star.own { cursor: grab; }
+  .star-core { fill: #fff6e6; }
+  .star-glow { fill: url(#star-glow); }
+  .star.bright .star-glow { opacity: 0.95; }
+  .star.soft .star-glow   { opacity: 0.7; }
+  .star.dim .star-glow    { opacity: 0.45; }
+  .star.faint .star-glow  { opacity: 0.25; }
+  .star.soft .star-core   { fill: #f3ead9; }
+  .star.dim .star-core    { fill: #d9d2c6; opacity: 0.85; }
+  .star.faint .star-core  { fill: #b9b3ab; opacity: 0.7; }
 
-  .star-ring { fill: none; stroke: var(--gold); stroke-width: 0.0035; stroke-dasharray: 0.007 0.006; opacity: 0.75; }
-  .star-you-label { fill: var(--gold); font-size: 0.026px; font-family: system-ui, sans-serif; letter-spacing: 0.0005px; opacity: 0.85; }
+  /* Glowing visitors: a pale-blue halo and a slowly breathing ring. */
+  .star-halo { fill: url(#star-halo); }
+  .star-breath { fill: none; stroke: #c9e2ff; stroke-width: 0.0018; opacity: 0.6; transform-box: fill-box; transform-origin: center; }
+
+  /* Your star: an ivory core with a thin ring and a small "you" label. */
+  .star.own .star-core { fill: #fffaf0; }
+  .star-ring { fill: none; stroke: #f6efe2; stroke-width: 0.0016; opacity: 0.85; }
+  .star-you-label { fill: #f6efe2; font-size: 0.022px; font-family: ui-monospace, "Courier New", monospace; letter-spacing: 0.002px; opacity: 0.85; }
   .star:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .star:focus { outline: none; }
+  .star:focus-visible .star-ring { stroke: #ffffff; stroke-width: 0.0028; opacity: 1; }
 
   @media (prefers-reduced-motion: no-preference) {
-    .star { transition: cx 0.4s ease, cy 0.4s ease, r 0.3s ease, opacity 0.8s ease; }
-    .star-ring, .star-you-label { transition: cx 0.4s ease, cy 0.4s ease; }
-    .star-ring { animation: ring-breathe 4s ease-in-out infinite; }
-    .star.new-ring { animation: ring-pulse 1.6s ease-out; }
+    .star { transition: transform 0.4s ease; }
+    .star.dragging { transition: none; }
+    .star-breath { animation: star-breathe 4.5s ease-in-out infinite; }
+    .star.new-ring .star-core { animation: star-arrive 1.6s ease-out; }
+    .lounge-backdrop { transition: opacity 900ms ease; }
   }
-  @keyframes ring-breathe {
-    0%, 100% { opacity: 0.55; }
-    50% { opacity: 0.9; }
+  @keyframes star-breathe {
+    0%, 100% { opacity: 0.25; transform: scale(0.85); }
+    50% { opacity: 0.75; transform: scale(1.15); }
   }
-  @keyframes ring-pulse {
-    0% { stroke: var(--gold); stroke-width: 0.025; stroke-opacity: 0.9; }
-    100% { stroke-width: 0.06; stroke-opacity: 0; }
+  @keyframes star-arrive {
+    0% { opacity: 0.3; }
+    100% { opacity: 1; }
   }
 
   #status {
@@ -356,16 +435,14 @@ export function renderHomePage(
   #status.visible { opacity: 1; }
   #status.error { color: #f1c5c5; }
 
-  .star.live { stroke: var(--blue-fire); stroke-width: 0.004; filter: drop-shadow(0 0 0.018 rgba(184, 216, 240, 0.9)); }
-  .star.live.own { stroke: var(--gold); }
-  #count, #since, #live-status { color: var(--muted); font-size: 0.9rem; text-align: center; margin: 0.3rem 0; }
+  #count, #since, #live-status { color: #b9bccb; font-size: 0.88rem; text-align: center; margin: 0.3rem 0; }
   #live-status.connected { color: #d4e5f2; }
 
-  #legend { display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin: 1rem 0 0.5rem; color: var(--muted); font-size: 0.78rem; }
-  .legend-dot.bright { fill: #fff9eb; }
-  .legend-dot.soft   { fill: #ebd8bf; opacity: 0.88; }
-  .legend-dot.dim    { fill: #b99597; opacity: 0.62; }
-  .legend-dot.faint  { fill: #80666e; opacity: 0.5; }
+  #legend { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem; margin: 1rem 0 0.5rem; color: #a9acbb; font-size: 0.76rem; }
+  .legend-dot { fill: #fff6e6; }
+  .legend-dot.soft   { opacity: 0.8; }
+  .legend-dot.dim    { opacity: 0.55; }
+  .legend-dot.faint  { opacity: 0.32; }
 
   footer { text-align: center; margin-top: 1rem; }
   footer a { color: #d6d6df; }
@@ -402,13 +479,21 @@ export function renderHomePage(
     </div>
   </div>
 </section>
+<div class="lounge-backdrop" aria-hidden="true"></div>
 <main id="sky-app" aria-hidden="true">
-  <h1>Overlap</h1>
-  <p>A quiet anonymous study lounge. Place your star, settle in, and see that others are quietly here.</p>
+  <header class="lounge-header">
+    <p class="lounge-kicker">OVERLAP · ANONYMOUS STUDY LOUNGE</p>
+    <h1>Overlap</h1>
+    <p class="lounge-intro">Place your star, settle in, and see that others are quietly here.</p>
+  </header>
   <p class="sr-only">${escapeHtml(summary)}</p>
   ${placePrompt}
   <div id="sky-wrap">
     <svg id="sky" viewBox="0 0 1 1" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeAttr(summary)}">
+      <defs>
+        <radialGradient id="star-glow"><stop offset="0" stop-color="#fff2d8" stop-opacity="0.85"/><stop offset="0.35" stop-color="#ffe6c2" stop-opacity="0.32"/><stop offset="1" stop-color="#ffe6c2" stop-opacity="0"/></radialGradient>
+        <radialGradient id="star-halo"><stop offset="0" stop-color="#cfe6ff" stop-opacity="0.55"/><stop offset="0.5" stop-color="#9cc8ff" stop-opacity="0.2"/><stop offset="1" stop-color="#9cc8ff" stop-opacity="0"/></radialGradient>
+      </defs>
       ${circles}
     </svg>
   </div>

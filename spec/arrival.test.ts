@@ -69,7 +69,8 @@ it("the inside of the lounge describes only what is built", async () => {
   const app = doc.getElementById("sky-app")!;
   expect(visibleText(app.querySelector("h1")!)).toBe("Overlap");
   const text = visibleText(app).toLowerCase();
-  expect(text).toContain("a quiet anonymous study lounge. place your star, settle in, and see that others are quietly here.");
+  expect(visibleText(app.querySelector(".lounge-kicker")!)).toBe("OVERLAP · ANONYMOUS STUDY LOUNGE");
+  expect(text).toContain("place your star, settle in, and see that others are quietly here.");
   expect(text).not.toMatch(/\bchat\b|\bmessage\b|\bmusic\b|\bambience\b|\btimer\b/);
 });
 
