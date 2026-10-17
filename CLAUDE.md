@@ -34,6 +34,8 @@ What the agent needs to carry from any of it is your call.
 - Only a visitor who has entered and has a star checks in through `/api/here`.
 - All visitor-facing wording follows `docs/terms.md`: the place is the **lounge**, a visitor's mark is a **star**, and **glowing** means a visitor has entered the lounge and has a visible tab. "Sky" may describe the picture, never name the place.
 
+No media file without its source and licence recorded in docs/credits.md; nothing from social media and no commercial music.
+
 A visitor counts as here only after entering the lounge; the arrival screen never opens the live stream or calls /api/here.
 
 The arrival artwork is a picture. Inside the lounge, every point of light is a visitor.

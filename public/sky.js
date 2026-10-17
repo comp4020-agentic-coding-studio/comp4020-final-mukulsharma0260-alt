@@ -448,6 +448,343 @@ function stopArrivalVideo() {
   if (video && !video.paused) video.pause();
 }
 
+// ---- The arrival film -----------------------------------------------------
+// A first entry plays a 30-second film before the lounge opens: a warp drawn
+// in code on a canvas, with a soft generated pad. Nothing is downloaded for
+// it. The visitor only counts as glowing once the lounge opens (joinLounge),
+// never during the film. Later entries, and reduced motion, skip it.
+
+const FILM_MS = 30_000;
+const FILM_SEEN_KEY = "overlap-film-seen";
+const FILM_MUTED_KEY = "overlap-film-muted";
+const FILM_LINES = [
+  "Leaving the noise behind…",
+  "Finding a quiet corner…",
+  "Making space to focus…",
+  "Nobody here needs a name…",
+  "Somewhere, someone else is studying too…",
+  "Settling in…",
+];
+const LINE_MS = 5_000;
+
+const filmEl = document.getElementById("arrival-film");
+const filmCanvas = document.getElementById("film-canvas");
+const filmLine = document.getElementById("film-line");
+const filmFill = document.getElementById("film-bar-fill");
+const filmBar = document.querySelector("#arrival-film .film-bar");
+const filmRemaining = document.getElementById("film-remaining");
+const filmSkip = document.getElementById("film-skip");
+const filmSound = document.getElementById("film-sound");
+
+let filming = false;
+let filmStartedAt = 0;
+let filmTimers = [];
+let filmFrame;
+let filmAudio;
+
+function readFlag(key) {
+  try {
+    return window.localStorage.getItem(key) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function writeFlag(key, on) {
+  try {
+    if (on) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Blocked storage only means the film or the mute choice is not remembered.
+  }
+}
+
+// --- Warp, drawn in code ---------------------------------------------------
+// Streaks start near the galaxy's bright core and rush outward, accelerating
+// slowly over the 30 seconds. Each streak is respawned at the core when it
+// leaves the screen, so the flight never loops or seams.
+const WARP_COLOURS = ["#9fb4ff", "#b49cff", "#c8d2ff", "#f6efe2", "#f6efe2", "#ffc98a"];
+let warp;
+
+function sizeCanvas() {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.round(filmCanvas.clientWidth * ratio));
+  const h = Math.max(1, Math.round(filmCanvas.clientHeight * ratio));
+  if (filmCanvas.width !== w || filmCanvas.height !== h) {
+    filmCanvas.width = w;
+    filmCanvas.height = h;
+  }
+  return { w, h, ratio };
+}
+
+function spawnStreak(s, fresh) {
+  s.angle = Math.random() * Math.PI * 2;
+  s.depth = fresh ? Math.random() : 0.02 + Math.random() * 0.05;
+  s.speed = 0.6 + Math.random() * 0.8;
+  s.colour = WARP_COLOURS[Math.floor(Math.random() * WARP_COLOURS.length)];
+  s.width = 0.6 + Math.random() * 1.2;
+  return s;
+}
+
+// Animation frames where the browser has them, a timer where it does not, so
+// a missing API can never trap a visitor in the film.
+const nextFrame = window.requestAnimationFrame
+  ? (cb) => window.requestAnimationFrame(cb)
+  : (cb) => setTimeout(() => cb(performance.now()), 16);
+const cancelFrame = window.cancelAnimationFrame
+  ? (id) => window.cancelAnimationFrame(id)
+  : (id) => clearTimeout(id);
+
+function startWarp() {
+  const ctx = filmCanvas.getContext?.("2d");
+  if (!ctx) return;
+  warp = { ctx, streaks: Array.from({ length: 220 }, () => spawnStreak({}, true)), last: performance.now() };
+  runWarp();
+}
+
+function runWarp() {
+  if (!warp || filmFrame !== undefined) return;
+  warp.last = performance.now();
+  const frame = (now) => {
+    if (!filming) return;
+    const dt = Math.min(0.05, (now - warp.last) / 1000);
+    warp.last = now;
+    drawWarp(dt);
+    filmFrame = nextFrame(frame);
+  };
+  filmFrame = nextFrame(frame);
+}
+
+function drawWarp(dt) {
+  const { ctx } = warp;
+  const { w, h, ratio } = sizeCanvas();
+  // The galaxy's bright core sits up and to the right in the arrival image;
+  // the flight heads there.
+  const cx = w * 0.62;
+  const cy = h * 0.4;
+  const reach = Math.hypot(w, h) * 0.75;
+  // filmStartedAt is a Date.now() time, so progress must use the same clock.
+  const progress = Math.min(1, Math.max(0, (Date.now() - filmStartedAt) / FILM_MS));
+  const pace = 0.12 + progress * progress * 0.55;
+
+  // Trails: fade the last frame instead of clearing it.
+  ctx.fillStyle = "rgba(2, 3, 12, 0.26)";
+  ctx.fillRect(0, 0, w, h);
+
+  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, reach * (0.22 + progress * 0.12));
+  core.addColorStop(0, "rgba(255, 244, 226, 0.5)");
+  core.addColorStop(0.25, "rgba(176, 156, 255, 0.18)");
+  core.addColorStop(1, "rgba(20, 22, 60, 0)");
+  ctx.fillStyle = core;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.lineCap = "round";
+  for (const s of warp.streaks) {
+    const before = s.depth;
+    s.depth += dt * pace * s.speed * (0.4 + s.depth * 2.2);
+    if (s.depth > 1.15) {
+      spawnStreak(s, false);
+      continue;
+    }
+    const r0 = before * before * reach;
+    const r1 = s.depth * s.depth * reach;
+    ctx.globalAlpha = Math.min(1, s.depth * 1.6);
+    ctx.strokeStyle = s.colour;
+    ctx.lineWidth = s.width * ratio * (0.4 + s.depth * 1.4);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(s.angle) * r0, cy + Math.sin(s.angle) * r0);
+    ctx.lineTo(cx + Math.cos(s.angle) * r1, cy + Math.sin(s.angle) * r1);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function stopWarp() {
+  if (filmFrame !== undefined) cancelFrame(filmFrame);
+  filmFrame = undefined;
+}
+
+// --- Music, generated with Web Audio ---------------------------------------
+// A slow pad: a few soft sine voices on a pentatonic scale, through a
+// low-pass filter and a generated reverb, swelling gently. Film only.
+const PENTATONIC_HZ = [196.0, 220.0, 261.63, 293.66, 329.63, 392.0];
+const MUSIC_LEVEL = 0.07;
+
+function makeReverb(ctx) {
+  const seconds = 3.5;
+  const length = Math.floor(ctx.sampleRate * seconds);
+  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 2.4;
+  }
+  const convolver = ctx.createConvolver();
+  convolver.buffer = impulse;
+  return convolver;
+}
+
+function startMusic() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx || filmAudio) return;
+  const ctx = new Ctx();
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0, ctx.currentTime);
+  master.gain.linearRampToValueAtTime(MUSIC_LEVEL, ctx.currentTime + 2);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(900, ctx.currentTime);
+  filter.Q.setValueAtTime(0.4, ctx.currentTime);
+  const reverb = makeReverb(ctx);
+  const wet = ctx.createGain();
+  wet.gain.setValueAtTime(0.6, ctx.currentTime);
+  filter.connect(master);
+  filter.connect(reverb);
+  reverb.connect(wet);
+  wet.connect(master);
+  master.connect(ctx.destination);
+
+  const voices = [0, 2, 4, 5].map((step, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(PENTATONIC_HZ[step], ctx.currentTime);
+    osc.detune.setValueAtTime((i - 1.5) * 4, ctx.currentTime);
+    const swell = ctx.createGain();
+    swell.gain.setValueAtTime(0.15, ctx.currentTime);
+    osc.connect(swell);
+    swell.connect(filter);
+    osc.start();
+    return { osc, swell, phase: i * 1.7 };
+  });
+
+  // Slow swells, and now and then one voice drifts to another scale note.
+  const tick = setInterval(() => {
+    const t = ctx.currentTime;
+    for (const v of voices) {
+      const level = 0.12 + 0.1 * (0.5 + 0.5 * Math.sin(t / 3.2 + v.phase));
+      v.swell.gain.setTargetAtTime(level, t, 1.5);
+    }
+    if (Math.random() < 0.25) {
+      const v = voices[Math.floor(Math.random() * voices.length)];
+      v.osc.frequency.setTargetAtTime(PENTATONIC_HZ[Math.floor(Math.random() * PENTATONIC_HZ.length)], t, 2.5);
+    }
+  }, 1_500);
+
+  filmAudio = { ctx, master, voices, tick };
+  if (readFlag(FILM_MUTED_KEY)) ctx.suspend();
+}
+
+function stopMusic() {
+  if (!filmAudio) return;
+  const { ctx, master, voices, tick } = filmAudio;
+  filmAudio = undefined;
+  clearInterval(tick);
+  // Fade out over a second, then release the audio entirely: the lounge is
+  // quiet.
+  master.gain.cancelScheduledValues(ctx.currentTime);
+  master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
+  master.gain.linearRampToValueAtTime(0, ctx.currentTime + 1);
+  setTimeout(() => {
+    for (const v of voices) v.osc.stop();
+    ctx.close();
+  }, 1_100);
+}
+
+function updateSoundPill() {
+  const muted = readFlag(FILM_MUTED_KEY);
+  filmSound.textContent = muted ? "SOUND" : "MUTE";
+  filmSound.setAttribute("aria-pressed", String(muted));
+  filmSound.setAttribute("aria-label", muted ? "Sound is off. Turn sound on" : "Sound is on. Mute");
+}
+
+function toggleSound() {
+  const muted = !readFlag(FILM_MUTED_KEY);
+  writeFlag(FILM_MUTED_KEY, muted);
+  updateSoundPill();
+  if (!filmAudio && !muted && filming) startMusic();
+  else if (filmAudio) muted ? filmAudio.ctx.suspend() : filmAudio.ctx.resume();
+}
+
+// --- Words and the bar -----------------------------------------------------
+function showFilmLine(index) {
+  filmLine.textContent = FILM_LINES[index % FILM_LINES.length];
+}
+
+function startFilmWords() {
+  let index = Math.floor(Math.random() * FILM_LINES.length);
+  showFilmLine(index);
+  filmTimers.push(setInterval(() => {
+    index++;
+    if (reducedMotion) return showFilmLine(index);
+    filmLine.classList.add("fading");
+    filmTimers.push(setTimeout(() => {
+      showFilmLine(index);
+      filmLine.classList.remove("fading");
+    }, 600));
+  }, LINE_MS));
+}
+
+function updateFilmBar() {
+  const elapsed = Math.min(FILM_MS, Date.now() - filmStartedAt);
+  filmFill.style.width = `${(elapsed / FILM_MS) * 100}%`;
+  const left = Math.ceil((FILM_MS - elapsed) / 1000);
+  filmRemaining.textContent = `${left}s`;
+  filmBar.setAttribute("aria-valuenow", String(Math.round(elapsed / 1000)));
+}
+
+// --- The film's timeline ---------------------------------------------------
+function filmAllowed() {
+  return Boolean(filmEl) && !reducedMotion && !readFlag(FILM_SEEN_KEY);
+}
+
+function playFilm() {
+  filming = true;
+  filmStartedAt = Date.now();
+  writeFlag(FILM_SEEN_KEY, true);
+  stopArrivalVideo();
+  document.body.classList.add("filming");
+  filmEl.setAttribute("aria-hidden", "false");
+  updateSoundPill();
+  updateFilmBar();
+  startFilmWords();
+  filmTimers.push(setInterval(updateFilmBar, 250));
+  filmTimers.push(setTimeout(endFilm, FILM_MS));
+  if (!readFlag(FILM_MUTED_KEY)) startMusic();
+  startWarp();
+  filmSkip.focus();
+}
+
+function endFilm() {
+  if (!filming) return;
+  filming = false;
+  for (const t of filmTimers) {
+    clearTimeout(t);
+    clearInterval(t);
+  }
+  filmTimers = [];
+  stopWarp();
+  stopMusic();
+  document.body.classList.remove("filming");
+  filmEl.setAttribute("aria-hidden", "true");
+  // The lounge opens at once; the music's fade happens as it does.
+  activateSky();
+}
+
+// The warp pauses while the tab is hidden, and picks up where it left off.
+document.addEventListener("visibilitychange", () => {
+  if (!filming) return;
+  if (document.visibilityState === "hidden") stopWarp();
+  else runWarp();
+});
+
+function enterLounge() {
+  if (skyActive || filming) return;
+  saveCheckIn();
+  if (filmAllowed()) playFilm();
+  else activateSky();
+}
+
+
 function activateSky({ remember = false } = {}) {
   if (skyActive) return;
   if (remember) saveCheckIn();
@@ -487,9 +824,20 @@ function activateSky({ remember = false } = {}) {
     });
   }
 
-  arrivalButton?.addEventListener("click", () => activateSky({ remember: true }));
+  arrivalButton?.addEventListener("click", enterLounge);
+  filmSkip?.addEventListener("click", endFilm);
+  filmSound?.addEventListener("click", toggleSound);
   document.addEventListener("keydown", (e) => {
-    if (!skyActive && e.key === "Escape") activateSky({ remember: true });
+    // During the film, Enter and Escape both skip it. Enter on a focused
+    // button (Skip or the sound pill) is that button's own click instead.
+    if (filming) {
+      if (e.key === "Escape" || (e.key === "Enter" && e.target?.tagName !== "BUTTON")) {
+        e.preventDefault();
+        endFilm();
+      }
+      return;
+    }
+    if (!skyActive && e.key === "Escape") enterLounge();
   });
 
   if (hasCheckedIn()) activateSky();

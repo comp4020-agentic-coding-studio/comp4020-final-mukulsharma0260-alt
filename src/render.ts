@@ -191,6 +191,89 @@ export function renderHomePage(
     outline-offset: 5px;
     box-shadow: 0 0 0 7px rgba(250, 244, 230, 0.14), 0 0 22px rgba(250, 244, 230, 0.28);
   }
+  /* The arrival film. It fills the whole viewport: the layer is fixed to it
+     and the canvas is absolutely positioned inside, with no pixel sizes,
+     max-width, transforms or scale anywhere, so nothing can shrink it into a
+     centred box. */
+  #arrival-film {
+    position: fixed;
+    z-index: 20;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    background: #000;
+    color: var(--ivory);
+    display: none;
+  }
+  body.filming #arrival-film { display: block; }
+  body.filming #arrival { visibility: hidden; opacity: 0; pointer-events: none; }
+  #film-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  /* A soft vignette, so the edges fall away into atmosphere. */
+  .film-vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse 75% 70% at 50% 45%, transparent 35%, rgba(0, 0, 4, 0.55) 78%, rgba(0, 0, 4, 0.9) 100%);
+  }
+  .film-copy {
+    position: absolute;
+    z-index: 1;
+    left: 0;
+    right: 0;
+    bottom: max(7vh, 2.5rem);
+    padding: 0 1.25rem;
+    text-align: center;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.9);
+  }
+  #film-line {
+    min-height: 1.4em;
+    margin: 0 0 1.1rem;
+    font: clamp(1.05rem, 2.6vw, 1.5rem)/1.35 "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    color: #f7f1e4;
+    opacity: 1;
+    transition: opacity 600ms ease;
+  }
+  #film-line.fading { opacity: 0; }
+  .film-progress { width: min(100%, 20rem); margin: 0 auto; }
+  .film-progress-label {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 0 0.45rem;
+    color: #d9dbe6;
+    font: 600 0.66rem ui-monospace, "Courier New", monospace;
+    letter-spacing: 0.18em;
+  }
+  .film-bar { height: 2px; background: rgba(250, 244, 230, 0.2); overflow: hidden; }
+  #film-bar-fill { display: block; width: 0; height: 100%; background: #f6efe2; }
+  .film-pill {
+    position: absolute;
+    z-index: 2;
+    top: 1rem;
+    border: 1px solid rgba(250, 244, 230, 0.6);
+    border-radius: 999px;
+    padding: 0.42rem 0.75rem;
+    color: #f7f1e4;
+    background: rgba(2, 4, 12, 0.5);
+    font: 600 0.62rem ui-monospace, "Courier New", monospace;
+    letter-spacing: 0.12em;
+    cursor: pointer;
+  }
+  #film-sound { right: 1rem; }
+  /* Skip sits bottom-right on wide screens; on narrow ones it moves to the
+     top-left, so it never overlaps the mood line or the bar. */
+  #film-skip { top: auto; right: 1rem; bottom: 1rem; }
+  @media (max-width: 640px) {
+    #film-skip { top: 1rem; right: auto; bottom: auto; left: 1rem; }
+  }
+  .film-pill:focus-visible { outline: 2px solid rgba(250, 244, 230, 0.9); outline-offset: 2px; }
   #sky-app h1:focus-visible {
     outline: 2px solid rgba(250, 244, 230, 0.7);
     outline-offset: 6px;
@@ -304,6 +387,19 @@ export function renderHomePage(
     <h1 id="arrival-title">STUDY, NOT ALONE.</h1>
     <p class="arrival-copy">A quiet place for late-night study. Arrive anonymously, see that others are here, and keep each other company without profiles or pressure.</p>
     <button id="arrival-submit" type="button">ENTER THE LOUNGE →</button>
+  </div>
+</section>
+<section id="arrival-film" aria-hidden="true" aria-label="Arriving in the lounge">
+  <canvas id="film-canvas" aria-hidden="true"></canvas>
+  <div class="film-vignette" aria-hidden="true"></div>
+  <button id="film-sound" class="film-pill" type="button" aria-pressed="false">MUTE</button>
+  <button id="film-skip" class="film-pill" type="button">SKIP →</button>
+  <div class="film-copy">
+    <p id="film-line"></p>
+    <div class="film-progress">
+      <p class="film-progress-label"><span>ARRIVING</span><span id="film-remaining">30s</span></p>
+      <div class="film-bar" role="progressbar" aria-label="Arriving" aria-valuemin="0" aria-valuemax="30" aria-valuenow="0"><span id="film-bar-fill"></span></div>
+    </div>
   </div>
 </section>
 <main id="sky-app" aria-hidden="true">
