@@ -2,7 +2,7 @@
 
 Live means looking at the sky
 
-# Status: Accepted
+# Status: Accepted. Amended by ADR 0006.
 
 Supersedes [ADR 0004](0004-live-means-an-open-sky-connection.md).
 
