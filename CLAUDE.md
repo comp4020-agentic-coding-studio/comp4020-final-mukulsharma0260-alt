@@ -20,7 +20,7 @@ What the agent needs to carry from any of it is your call.
 - The app accepts no free text from visitors.
 - Before interpreting a live result, state local HEAD, deployed SHA if known, and whether the tree is clean.
 - Do not claim a visitor is physically present. For Crit 8, "last seen" means their last successful request to `/api/here`.
-- For Crit 9, a star is "live" only while at least one authenticated browser has an open `/events` connection. Say "a browser is looking at the sky", never that a person is physically here.
+- For Crit 9, a star is "live" only while at least one authenticated browser has an open `/events` connection. Say the star is "glowing" because a browser has the lounge open, never that a person is physically here.
 - `/events` may hold temporary connection state in server memory, but it must never write that state to SQLite. A deploy or restart clears it and reconnecting browsers rebuild it.
 - Live events may expose only a star id, normalised coordinates, and a rough brightness bucket. They must never expose a cookie token, token hash, or anybody's exact timestamp.
 - A move made by one browser must reach another open browser through `/events` without a reload, within about one second; keep a check that proves it.
@@ -31,8 +31,7 @@ What the agent needs to carry from any of it is your call.
 - Every live event follows the same privacy rules as the page.
 - Never claim a person is physically present; live means an open, visible tab.
 - Every visitor who has entered gets live updates, with or without a star.
-- A visitor starts looking at the sky only after entering it; the arrival screen never opens the live stream or counts as glowing.
-- Any arrival-background lights are fixed atmosphere, never live-presence signals; only interactive sky stars represent visitors.
+- Only a visitor who has entered and has a star checks in through `/api/here`.
 - All visitor-facing wording follows `docs/terms.md`: the place is the **lounge**, a visitor's mark is a **star**, and **glowing** means a visitor has entered the lounge and has a visible tab. "Sky" may describe the picture, never name the place.
 
 A visitor counts as here only after entering the lounge; the arrival screen never opens the live stream or calls /api/here.
