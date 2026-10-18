@@ -28,9 +28,9 @@ permission rule nor any bug in it could be seen in production.
    shown working, and a production bug cannot be traced to the action that
    caused it. Rejected.
 3. **Log the public star id as an anonymous actor label (chosen).** Every
-   star already has a random UUID that the page shows to everyone. It is
-   stable for a browser, different between browsers, and grants no
-   authority.
+   star already has a random UUID that is shared with connected browsers as
+   public star state. It is stable for a browser, different between
+   browsers, and grants no authority.
 
 # Decision
 
