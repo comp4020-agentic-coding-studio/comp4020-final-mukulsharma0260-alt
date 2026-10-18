@@ -16,6 +16,7 @@ What the agent needs to carry from any of it is your call.
 - Star positions are stored as fractions from 0 to 1, never pixels.
 - The database stores only a SHA-256 hash of the anonymous identity token.
 - Cookie tokens and token hashes must never appear in HTML, browser JavaScript, logs, or tests.
+- Audit logs go through `src/audit.ts` and use only a public star id (or `anonymous`) as the actor. They never contain cookie tokens, token hashes, cookies, IP addresses, raw request bodies, or another visitor's timestamps. Log meaningful actions only, never page loads or live streams.
 - Other people's exact timestamps must never appear in the HTML, attributes, visible UI, or logs. Show only rough buckets.
 - The app accepts no free text from visitors.
 - Before interpreting a live result, state local HEAD, deployed SHA if known, and whether the tree is clean.
