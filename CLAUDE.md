@@ -23,7 +23,7 @@ What the agent needs to carry from any of it is your call.
 - Do not claim a visitor is physically present. For Crit 8, "last seen" means their last successful request to `/api/here`.
 - For Crit 9, a star is glowing only while at least one authenticated browser has the lounge open in a visible tab. Never claim a person is physically here.
 - `/events` may hold temporary connection state in server memory, but it must never write that state to SQLite. A deploy or restart clears it and reconnecting browsers rebuild it.
-- Live events may expose only a star id, normalised coordinates, and a rough brightness bucket. They must never expose a cookie token, token hash, or anybody's exact timestamp.
+- Live events may expose only a star id, normalised coordinates, a rough brightness bucket, the star's constellation id (one of five fixed values, ADR 0010), and counts (live, traces, listeners per Break mode). They must never expose a cookie token, token hash, or anybody's exact timestamp.
 - A move made by one browser must reach another open browser through `/events` without a reload, within about one second; keep a check that proves it.
 - A test that passes on rerun is a failing test until its cause is found.
 - Live checks against production are read-only. If a live check must write, it deletes what it created in the same step and reports the ids.
@@ -33,11 +33,15 @@ What the agent needs to carry from any of it is your call.
 - Never claim a person is physically present; live means an open, visible tab.
 - Every visitor who has entered gets live updates, with or without a star.
 - Only a visitor who has entered and has a star checks in through `/api/here`.
-- All visitor-facing wording follows `docs/terms.md`: the place is the **lounge**, a visitor's mark is a **star**, and **glowing** means a visitor has entered the lounge and has a visible tab. "Sky" may describe the picture, never name the place.
+- All visitor-facing wording follows `docs/terms.md`: the place is the **lounge**, its default view is the **Common Room**, the five subject spaces are **constellations**, a visitor's mark is a **star**, and **glowing** means a visitor has entered the lounge and has a visible tab. "Sky" may describe the picture, never name the place.
+- Break listening is presence: in memory only, only for a glowing star, sent as counts per mode, never stored or tied to a star id in any event (ADR 0011).
+- No location is collected, stored, logged or sent, and no location control appears, until an ADR allows it (docs/proposals/distance-filter.md).
 
 No media file without its source and licence recorded in docs/credits.md; nothing from social media and no commercial music.
 
 A visitor counts as here only after entering the lounge; the arrival screen never opens the live stream or calls /api/here.
+
+A star's constellation lives only on the star in SQLite, set by its own cookie through `POST /api/star/constellation`; never in localStorage, never backfilled for old stars.
 
 The arrival artwork is a picture. Inside the lounge, every point of light is a visitor.
 

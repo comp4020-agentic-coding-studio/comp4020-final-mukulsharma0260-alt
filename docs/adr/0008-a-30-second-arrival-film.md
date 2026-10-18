@@ -28,17 +28,20 @@ pretend to be loading, and must never trap them.
 
 # Decision
 
-Option 3. A first entry plays a 30-second film: a warp towards the galaxy's
-bright core, drawn in code on a canvas, with a soft pad generated with Web
-Audio. A small "ARRIVING" bar shows progress through the film and the
-seconds left; it never says "loading" or "ready", because nothing is
-loading. One mood line at a time changes every five seconds.
+Option 3. A first entry plays a 30-second film: the author's Luna AI video,
+full-screen and silent, with its skull, face and nude shots removed, slowed to 30 seconds with its hard cuts dissolved so
+it never flashes, scored with original music by the project author. A small "ARRIVING" bar shows progress through the film and the
+seconds left; it never says "loading" or "ready", because it is not a
+loading screen. One mood line at a time changes every five seconds.
 
-When the film ends or is skipped, the music fades out over a second and the
+The music is fetched only after Enter. It starts quietly, fades in over a
+second, and is never downloaded under reduced motion, Save-Data or a 2g
+connection; the film then plays silently. When the film ends or is skipped,
+the music fades out over a second and the
 lounge opens immediately; only then does the visitor start glowing. A browser
 that has watched or skipped the film goes straight in on later entries.
-Reduced motion gets no film and no music. The film is drawn rather than
-downloaded, so it costs nothing on Save-Data or a slow connection.
+Reduced motion, Save-Data and 2g connections get no film and no music; they
+go straight into the lounge.
 
 Music plays only in the film. The lounge stays quiet.
 
@@ -46,10 +49,16 @@ Music plays only in the film. The lounge stays quiet.
 
 - First entry is delayed by up to 30 seconds for anyone who does not skip.
   Skip is visible from the start, but a visitor who misses it waits.
-- The film is drawn in code, not filmed: no footage to licence and no file to
-  download, but also no photographic detail. Its look depends on the device's
-  canvas performance, and it is drawn at a device pixel ratio of at most 2.
-- The music is a generated pad, not a composed track. It is quiet by design;
-  a MUTE pill turns it off, and that choice is remembered.
+- The source is 720p. It is upscaled to 1080p, which looks sharper on large
+  screens but cannot add real detail. The files are about 15 MB (MP4) and
+  10 MB (WebM), downloaded on first entry only, and only after Enter.
+- The music is a 30-second, 480 KB file, downloaded on first entry only. It
+  is quiet by design; a MUTE pill turns it off, and that choice is remembered.
+  If it fails to load, the film carries on in silence.
+
+Amended 18 October 2026: the drawn warp was replaced by the author's Luna AI
+video; the generated Web Audio
+pad was replaced by the author's own track; lines now run in a fixed order.
+Media are credited in [docs/credits.md](../credits.md).
 - The film is remembered per browser, in localStorage. Clearing site data
   shows it again.
