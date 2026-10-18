@@ -2,7 +2,7 @@
 
 ## What was the breakthrough that moved the work forward?
 
-This week I had to make the server explain itself. Two people use the app and I narrate from the logs, so I needed a way to say who did what without knowing who anyone is. Logging the cookie, or even its hash, was out, because that is the credential. Logging nothing meant I could not show the permission rule or debug anything later. I settled on the public star id: it is random, it already appears on the page, and it tells two browsers apart without naming anyone.
+This week I had to make the server explain itself. Two people use the app and I narrate from the logs, so I needed a way to say who did what without knowing who anyone is. Logging the cookie, or even its hash, was out, because that is the credential. Logging nothing meant I could not show the permission rule or debug anything later. I settled on the public star id: it is random, shared with connected browsers as public star state, and it tells two browsers apart without naming anyone.
 
 The surprising part was that the ownership rule was already right. A move had always been resolved from the cookie, and any star id in the request was ignored. What was missing was evidence. Once the logs existed, a test could check that when B sends A's id, the line names B as both actor and target and A's id appears nowhere.
 
