@@ -22,6 +22,7 @@ import type { Star } from "./db.ts";
 import { renderHomePage } from "./render.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { oldLight } from "./brightness.ts";
+import { ANONYMOUS, audit, starActor } from "./audit.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const DB_PATH = process.env.DB_PATH ?? "/data/stars.db";
@@ -194,12 +195,14 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
 
   res.setHeader("Set-Cookie", serializeIdentityCookie(token, IS_PROD));
   sendJson(res, 201, { star: ownStar(star) });
+  audit({ action: "star.created", actor: starActor(star.id), result: "created" });
   broadcastStar("created", star);
 }
 
 async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const identity = identityFromRequest(req);
   if (!identity) {
+    audit({ action: "star.move_denied", actor: ANONYMOUS, result: "no_owned_star" });
     sendJson(res, 400, { error: "no star to move" });
     return;
   }
@@ -219,6 +222,9 @@ async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promis
   const now = new Date().toISOString();
   const star = moveStar(db, hashToken(identity.token), b.x, b.y, now)!;
   sendJson(res, 200, { star: ownStar(star) });
+  // Actor and target are both the star the cookie resolved to. Any star id
+  // in the body is ignored, so it can never appear here.
+  audit({ action: "star.moved", actor: starActor(star.id), target: starActor(star.id), result: "ok" });
   broadcastStar("moved", star);
 }
 
@@ -232,6 +238,7 @@ function handleHere(req: IncomingMessage, res: ServerResponse): void {
   const now = new Date().toISOString();
   const result = touchSeen(db, hashToken(identity.token), now)!;
   const newStarIds = idsSeenSince(db, result.previousLastSeenSeq, result.star.id);
+  audit({ action: "presence.checked_in", actor: starActor(result.star.id), result: "ok" });
   sendJson(res, 200, {
     hasStar: true,
     newStarIds,
@@ -331,7 +338,13 @@ const server = createServer(async (req, res) => {
       sendJson(res, 404, { error: "not found" });
     }
   } catch (err) {
-    console.error(err);
+    // Enough to debug, nothing more: the method, which known route failed,
+    // and the error's class. Never the message, stack, URL, headers or body,
+    // any of which could carry something private.
+    const route = ["/", "/readme/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/here"]
+      .find((r) => req.url?.split("?")[0] === r) ?? "other";
+    const kind = err instanceof Error ? err.constructor.name : "unknown";
+    console.error(`error method=${req.method ?? "?"} route=${route} kind=${kind}`);
     sendJson(res, 500, { error: "internal error" });
   }
 });
