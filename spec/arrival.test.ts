@@ -67,13 +67,18 @@ it("the page has no name field, sign-in form or free-text input", async () => {
 it("the inside of the lounge describes only what is built", async () => {
   const { doc } = await arrival();
   const app = doc.getElementById("sky-app")!;
-  expect(visibleText(app.querySelector("h1")!)).toBe("Overlap");
+  expect(visibleText(app.querySelector("h1")!)).toBe("The Common Room");
+  expect(visibleText(app.querySelector(".wordmark")!)).toBe("Overlap");
   const text = visibleText(app).toLowerCase();
-  expect(visibleText(app.querySelector(".lounge-kicker")!)).toBe("OVERLAP · ANONYMOUS STUDY LOUNGE");
-  expect(text).toContain("place your star, settle in, and see that others are quietly here.");
-  expect(text).not.toMatch(/\bchat\b|\bmessage\b|\bmusic\b|\bambience\b|\btimer\b/);
+  expect(text).toContain("place your star. settle in. you are not studying alone.");
+  // No chat, no fake discussion or location, nothing promised that is not
+  // built. Break is built (real tracks), so music is allowed to be named.
+  expect(text).not.toMatch(/\bchat\b|\bmessage\b|\bambience\b|\btimer\b|discussion|simulated|prototype|observatory|\blater\b|\bsky\b|coming soon|nearby/);
+  expect(app.querySelector(".discussion")).toBeNull();
+  // The Common Room and exactly the five constellations, as real links.
+  const views = [...app.querySelectorAll("nav.lounge-nav a[data-view]")].map((a) => a.getAttribute("data-view"));
+  expect(views).toEqual(["common", "science", "engineering", "business", "health", "arts"]);
 });
-
 it("the arrival video is silent, control-free, decorative and local", async () => {
   const { section } = await arrival();
   const videos = section.querySelectorAll("video");
@@ -124,6 +129,9 @@ it("serves every arrival asset with its real content type", async () => {
     ["/assets/arrival-galaxy-v3.png", "image/png"],
     ["/assets/arrival-nebula-720.webm", "video/webm"],
     ["/assets/arrival-nebula-720.mp4", "video/mp4"],
+    ["/assets/arrival-film-music.mp3", "audio/mpeg"],
+    ["/assets/arrival-film-1080.webm", "video/webm"],
+    ["/assets/arrival-film-1080.mp4", "video/mp4"],
   ];
   for (const [path, type] of assets) {
     const res = await fetch(new URL(path, baseUrl));
@@ -135,6 +143,36 @@ it("serves every arrival asset with its real content type", async () => {
 
 it("does not serve files outside the asset allowlist", async () => {
   for (const path of ["/assets/../src/server.ts", "/assets/%2e%2e/src/server.ts", "/assets/arrival-galaxy-v1.png", "/assets/nope.webp"]) {
+    const res = await fetch(new URL(path, baseUrl));
+    expect(res.status, path).toBe(404);
+    await res.arrayBuffer();
+  }
+});
+
+it("the film fills the viewport: fixed, inset 0, 100vw by 100dvh, media cover", async () => {
+  const { html } = await arrival();
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+  const rule = (sel: string) => css.match(new RegExp(`${sel.replace(/[.#]/g, "\\$&")}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+  const film = rule("#arrival-film");
+  for (const decl of [/position:\s*fixed/, /inset:\s*0/, /width:\s*100vw/, /height:\s*100dvh/, /overflow:\s*hidden/]) {
+    expect(film).toMatch(decl);
+  }
+  const media = rule(".film-galaxy img, .film-cloud");
+  for (const decl of [/width:\s*100%/, /height:\s*100%/, /object-fit:\s*cover/]) expect(media).toMatch(decl);
+});
+
+it("serves media with byte ranges, so Safari can play the film's video and music", async () => {
+  for (const path of ["/assets/arrival-nebula-720.mp4", "/assets/arrival-film-music.mp3"]) {
+    const res = await fetch(new URL(path, baseUrl), { headers: { Range: "bytes=0-99" } });
+    expect(res.status, path).toBe(206);
+    expect(res.headers.get("accept-ranges"), path).toBe("bytes");
+    expect(res.headers.get("content-range"), path).toMatch(/^bytes 0-99\/\d+$/);
+    expect((await res.arrayBuffer()).byteLength, path).toBe(100);
+  }
+});
+
+it("does not serve the unused warp video or the uncut Luna clip", async () => {
+  for (const path of ["/assets/lounge-transition.mp4", "/assets/luna-original.mp4"]) {
     const res = await fetch(new URL(path, baseUrl));
     expect(res.status, path).toBe(404);
     await res.arrayBuffer();

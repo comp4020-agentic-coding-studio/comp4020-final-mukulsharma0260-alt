@@ -13,6 +13,16 @@ export interface Star {
   lastSeenAt: string;
   lastSeenSeq: number;
   seq: number;
+  constellation: Constellation | null;
+}
+
+// The five study constellations, fixed in code. The migration's CHECK holds
+// the same list, so a value outside it can be stored by neither path.
+export const CONSTELLATIONS = ["science", "engineering", "business", "health", "arts"] as const;
+export type Constellation = (typeof CONSTELLATIONS)[number];
+
+export function isConstellation(value: unknown): value is Constellation {
+  return typeof value === "string" && (CONSTELLATIONS as readonly string[]).includes(value);
 }
 
 interface StarRow {
@@ -25,6 +35,7 @@ interface StarRow {
   last_seen_at: string;
   last_seen_seq: number;
   seq: number;
+  constellation: string | null;
 }
 
 function fromRow(row: StarRow): Star {
@@ -38,6 +49,7 @@ function fromRow(row: StarRow): Star {
     lastSeenAt: row.last_seen_at,
     lastSeenSeq: row.last_seen_seq,
     seq: row.seq,
+    constellation: isConstellation(row.constellation) ? row.constellation : null,
   };
 }
 
@@ -72,17 +84,26 @@ export function getByHash(db: DatabaseSync, tokenHash: string): Star | undefined
 
 export function createStar(
   db: DatabaseSync,
-  args: { id: string; tokenHash: string; x: number; y: number; now: string },
+  args: { id: string; tokenHash: string; x: number; y: number; now: string; constellation?: Constellation | null },
 ): Star {
   // A new star starts "caught up" through its own row: seq is assigned from
   // star_seq in strict, never-reused insertion order, unlike created_at, so
   // it's what the "since last visit" window is measured against (see
   // idsSeenSince below).
   const seq = nextSeq(db);
-  db.prepare(
-    `INSERT INTO stars (id, token_hash, x, y, created_at, updated_at, last_seen_at, seq, last_seen_seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(args.id, args.tokenHash, args.x, args.y, args.now, args.now, args.now, seq, seq);
+  // The constellation column is only named when there is one to store, so
+  // this also works on a database that has not yet taken migration 004.
+  if (args.constellation) {
+    db.prepare(
+      `INSERT INTO stars (id, token_hash, x, y, created_at, updated_at, last_seen_at, seq, last_seen_seq, constellation)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(args.id, args.tokenHash, args.x, args.y, args.now, args.now, args.now, seq, seq, args.constellation);
+  } else {
+    db.prepare(
+      `INSERT INTO stars (id, token_hash, x, y, created_at, updated_at, last_seen_at, seq, last_seen_seq)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(args.id, args.tokenHash, args.x, args.y, args.now, args.now, args.now, seq, seq);
+  }
   return {
     id: args.id,
     tokenHash: args.tokenHash,
@@ -93,7 +114,55 @@ export function createStar(
     lastSeenAt: args.now,
     lastSeenSeq: seq,
     seq,
+    constellation: args.constellation ?? null,
   };
+}
+
+// Settles the caller's own star into a constellation, or unsettles it with
+// null. The star is found by token hash, so only its owner can change it.
+// When a position is given (settling into a region), it is written in the
+// same statement, so the star is never stored in one area's region while
+// marked as another.
+export function setConstellation(
+  db: DatabaseSync,
+  tokenHash: string,
+  constellation: Constellation | null,
+  now: string,
+  position?: { x: number; y: number },
+): Star | undefined {
+  if (position) {
+    db.prepare("UPDATE stars SET constellation = ?, x = ?, y = ?, updated_at = ? WHERE token_hash = ?").run(
+      constellation,
+      position.x,
+      position.y,
+      now,
+      tokenHash,
+    );
+  } else {
+    db.prepare("UPDATE stars SET constellation = ?, updated_at = ? WHERE token_hash = ?").run(
+      constellation,
+      now,
+      tokenHash,
+    );
+  }
+  return getByHash(db, tokenHash);
+}
+
+// Traces: how many stars have settled into each constellation, kept in
+// SQLite, so they outlive a deploy. Stars that never chose one are counted
+// separately rather than given an area.
+export function traceCounts(db: DatabaseSync): { byConstellation: Record<Constellation, number>; unsettled: number } {
+  const byConstellation = Object.fromEntries(CONSTELLATIONS.map((c) => [c, 0])) as Record<Constellation, number>;
+  let unsettled = 0;
+  const rows = db.prepare("SELECT constellation, COUNT(*) AS n FROM stars GROUP BY constellation").all() as Array<{
+    constellation: string | null;
+    n: number;
+  }>;
+  for (const row of rows) {
+    if (isConstellation(row.constellation)) byConstellation[row.constellation] = row.n;
+    else unsettled += row.n;
+  }
+  return { byConstellation, unsettled };
 }
 
 export function moveStar(

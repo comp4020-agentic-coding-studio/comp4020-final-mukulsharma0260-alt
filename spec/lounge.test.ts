@@ -8,12 +8,13 @@ import { expect, inject, it } from "vitest";
 const baseUrl = inject("baseUrl");
 const skyJs = readFileSync(new URL("../public/sky.js", import.meta.url), "utf8");
 
-type SyncStar = { id: string; x: number; y: number; brightness: string };
+type SyncStar = { id: string; x: number; y: number; brightness: string; constellation: string | null };
+type Sync = { stars: SyncStar[]; liveStarIds: string[]; liveByConstellation?: Record<string, number>; tracesByConstellation?: Record<string, number>; unsettledTraces?: number };
 
-async function loadLounge(opts: { cookie?: string; sync?: { stars: SyncStar[]; liveStarIds: string[] } } = {}) {
+async function loadLounge(opts: { cookie?: string; hash?: string; sync?: Sync } = {}) {
   const res = await fetch(new URL("/", baseUrl), { headers: opts.cookie ? { Cookie: opts.cookie } : {} });
   const html = await res.text();
-  const dom = new JSDOM(html, { url: baseUrl, runScripts: "outside-only" });
+  const dom = new JSDOM(html, { url: new URL(opts.hash ?? "", baseUrl).toString(), runScripts: "outside-only" });
   const { window } = dom;
   window.localStorage.setItem("overlap-arrival-v2", "entered");
   window.localStorage.setItem("overlap-film-seen", "1");
@@ -33,34 +34,44 @@ async function loadLounge(opts: { cookie?: string; sync?: { stars: SyncStar[]; l
   window.HTMLMediaElement.prototype.pause = () => {};
   window.eval(skyJs);
   if (opts.sync) listeners.sync?.({ data: JSON.stringify(opts.sync) });
-  return { window, doc: window.document, html, close: () => window.close() };
+  return { window, doc: window.document, html, listeners, close: () => window.close() };
 }
 
 const css = (html: string): string => html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
 
-async function newStarCookie(): Promise<{ cookie: string; id: string }> {
+async function newStarCookie(constellation?: string): Promise<{ cookie: string; id: string }> {
   const res = await fetch(new URL("/api/star", baseUrl), { method: "POST", body: "{}" });
   const { star } = await res.json();
-  return { cookie: res.headers.get("set-cookie")!.split(";")[0]!, id: star.id };
+  const cookie = res.headers.get("set-cookie")!.split(";")[0]!;
+  if (constellation) {
+    await fetch(new URL("/api/star/constellation", baseUrl), {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json", Origin: baseUrl },
+      body: JSON.stringify({ constellation }),
+    });
+  }
+  return { cookie, id: star.id };
 }
+
+const AREAS = ["science", "engineering", "business", "health", "arts"];
+const zero = () => Object.fromEntries(AREAS.map((a) => [a, 0]));
 
 it("after entering, focus is never on the heading: it goes to the place button", async () => {
   const l = await loadLounge();
   try {
-    const focused = l.doc.activeElement;
-    expect(focused?.tagName).not.toBe("H1");
-    expect(focused?.id).toBe("place-star");
+    expect(l.doc.activeElement?.tagName).not.toBe("H1");
+    expect(l.doc.activeElement?.id).toBe("place-star");
   } finally {
     l.close();
   }
 });
 
-it("after entering with a star, focus goes to the visitor's own star", async () => {
-  const { cookie } = await newStarCookie();
+it("after entering with a star, focus goes to the visitor's own star on the map", async () => {
+  const { cookie, id } = await newStarCookie();
   const l = await loadLounge({ cookie });
   try {
     const focused = l.doc.activeElement as Element | null;
-    expect(focused?.tagName).not.toBe("H1");
+    expect(focused?.getAttribute("data-id")).toBe(id);
     expect(focused?.getAttribute("data-own")).toBe("true");
   } finally {
     l.close();
@@ -78,68 +89,175 @@ it("entering announces itself, once, to screen readers", async () => {
   }
 });
 
-it("the number of rendered stars equals the sync snapshot", async () => {
-  const stars: SyncStar[] = Array.from({ length: 12 }, (_, i) => ({
-    id: `snap-${i}`, x: (i + 1) / 14, y: 0.5, brightness: ["bright", "soft", "dim", "faint"][i % 4]!,
-  }));
-  // Start from an HTML page whose server-side stars differ from the snapshot,
-  // so a renderer that only adds (never removes) would over-count.
+it("the Common Room draws exactly the snapshot's real stars, settled or not, and nothing else", async () => {
+  const stars: SyncStar[] = [
+    { id: "g-sci", x: 0.2, y: 0.2, brightness: "bright", constellation: "science" },
+    { id: "g-eng", x: 0.5, y: 0.2, brightness: "bright", constellation: "engineering" },
+    { id: "t-old", x: 0.5, y: 0.5, brightness: "faint", constellation: null },
+    { id: "g-free", x: 0.5, y: 0.45, brightness: "bright", constellation: null },
+  ];
+  const l = await loadLounge({ sync: { stars, liveStarIds: ["g-sci", "g-eng", "g-free"], liveByConstellation: { ...zero(), science: 1, engineering: 1 }, tracesByConstellation: { ...zero(), science: 1, engineering: 1 }, unsettledTraces: 2 } });
+  try {
+    const drawn = [...l.doc.querySelectorAll("#sky g.star[data-id]")].map((g) => g.getAttribute("data-id")).sort();
+    expect(drawn).toEqual(["g-eng", "g-free", "g-sci", "t-old"]);
+    expect(l.doc.querySelectorAll("#sky g.star.away")).toHaveLength(0);
+    // Glowing stars wear the sparkle; a past trace has none.
+    const g = (id: string) => l.doc.querySelector(`#sky g.star[data-id="${id}"]`)!;
+    expect(g("g-free").classList.contains("glowing")).toBe(true);
+    expect(g("g-free").querySelector(".star-sparkle")).not.toBeNull();
+    expect(g("t-old").classList.contains("trace")).toBe(true);
+    expect(g("t-old").querySelector(".star-sparkle")).toBeNull();
+    // Map decoration never uses a circle: only stars are points of light.
+    expect(l.doc.querySelectorAll("#figures circle, #regions circle")).toHaveLength(0);
+    expect(l.doc.getElementById("live-line")?.textContent).toBe("3 studying now · 4 traces");
+  } finally {
+    l.close();
+  }
+});
+it("each light level is drawn smaller and fainter than the one before, and glowing is brightest", async () => {
+  const levels: Array<[string, string]> = [["bright", "recent"], ["soft", "recent"], ["dim", "trace"], ["faint", "trace"]];
+  const stars = levels.map(([b], i) => ({ id: `lvl-${b}`, x: 0.2 + i * 0.2, y: 0.5, brightness: b, constellation: null }));
+  const l = await loadLounge({ sync: { stars: [...stars, { id: "lvl-live", x: 0.1, y: 0.5, brightness: "bright", constellation: null }], liveStarIds: ["lvl-live"] } });
+  try {
+    expect(l.doc.querySelector('#sky [data-id="lvl-live"]')?.classList.contains("glowing")).toBe(true);
+    for (const [b, level] of levels) expect(l.doc.querySelector(`#sky [data-id="lvl-${b}"]`)?.classList.contains(level), b).toBe(true);
+    // The stylesheet scales and fades each level less than the one above.
+    const sheet = css(l.html);
+    const scale = (level: string) => Number(sheet.match(new RegExp(`\\.star\\.${level}\\s+\\.star-core\\s*\\{[^}]*scale\\(([\\d.]+)\\)`))?.[1]);
+    const opacity = (level: string) => Number(sheet.match(new RegExp(`\\.star\\.${level}\\s+\\.star-core\\s*\\{[^}]*opacity:\\s*([\\d.]+)`))?.[1]);
+    expect(scale("glowing")).toBeGreaterThan(scale("recent"));
+    expect(scale("recent")).toBeGreaterThan(scale("trace"));
+    expect(opacity("glowing")).toBeGreaterThan(opacity("recent"));
+    expect(opacity("recent")).toBeGreaterThan(opacity("trace"));
+  } finally {
+    l.close();
+  }
+});
+it("a live event updates the stars and counts without a reload", async () => {
+  const l = await loadLounge({ sync: { stars: [], liveStarIds: [], liveByConstellation: zero(), tracesByConstellation: zero(), unsettledTraces: 0 } });
+  try {
+    const live = () => l.doc.querySelector('#regions a.region[data-region="arts"] .region-live')?.textContent;
+    expect(live()).toBe("Quiet");
+    l.listeners.star?.({ data: JSON.stringify({ change: "constellation", star: { id: "x1", x: 0.7, y: 0.7, brightness: "bright", constellation: "arts" } }) });
+    l.listeners.live?.({ data: JSON.stringify({ starIds: ["x1"], liveByConstellation: { ...zero(), arts: 1 }, tracesByConstellation: { ...zero(), arts: 1 }, unsettledTraces: 0 }) });
+    expect(live()).toBe("1 studying now");
+    expect(l.doc.querySelector('nav.lounge-nav a[data-view="arts"]')?.getAttribute("data-live")).toBe("1");
+    expect(l.doc.querySelector('#sky g.star[data-id="x1"]')?.classList.contains("glowing")).toBe(true);
+    l.listeners.live?.({ data: JSON.stringify({ starIds: [], liveByConstellation: zero(), tracesByConstellation: { ...zero(), arts: 1 }, unsettledTraces: 0 }) });
+    expect(live()).toBe("Quiet");
+    expect(l.doc.querySelector('#sky g.star[data-id="x1"]')?.classList.contains("glowing")).toBe(false);
+    // In Arts & Society's own view, its one trace is counted.
+    l.window.history.pushState(null, "", "#arts-society");
+    l.window.dispatchEvent(new l.window.PopStateEvent("popstate"));
+    expect(l.doc.getElementById("live-line")?.textContent).toBe("Nobody studying in Arts & Society right now · 1 trace");
+  } finally {
+    l.close();
+  }
+});
+it("your own star is marked by a ring and a 'you' label, and its constellation by the dock and the doorway", async () => {
+  const { cookie, id } = await newStarCookie("engineering");
+  const l = await loadLounge({ cookie });
+  try {
+    const own = l.doc.querySelector(`#sky g.star[data-id="${id}"]`)!;
+    expect(own.querySelector(".star-ring")).not.toBeNull();
+    expect(own.querySelector(".star-you")?.textContent).toBe("you");
+    expect(own.getAttribute("data-constellation")).toBe("engineering");
+    expect(l.doc.getElementById("where")?.textContent).toBe("Your star is in Engineering.");
+    expect(l.doc.querySelector('#regions a.region[data-region="engineering"]')?.classList.contains("is-yours")).toBe(true);
+    expect(l.doc.getElementById("leave-area")?.textContent).toBe("Leave Engineering");
+    expect(l.doc.getElementById("leave-area")?.hidden).toBe(false);
+  } finally {
+    l.close();
+  }
+});
+it("opening a constellation shows only its stars; the others are kept, not deleted", async () => {
+  const stars: SyncStar[] = [
+    { id: "in-h", x: 0.2, y: 0.7, brightness: "bright", constellation: "health" },
+    { id: "free", x: 0.5, y: 0.5, brightness: "bright", constellation: null },
+  ];
   const l = await loadLounge({ sync: { stars, liveStarIds: [] } });
   try {
-    // One <g class="star"> per star; its core also carries data-id, so count
-    // the groups, not every element with an id.
-    expect(l.doc.querySelectorAll("#sky g.star[data-id]")).toHaveLength(stars.length);
-    for (const s of stars) expect(l.doc.querySelector(`#sky g.star[data-id="${s.id}"]`)).not.toBeNull();
+    l.doc.querySelector<HTMLAnchorElement>('nav.lounge-nav a[data-view="health"]')!.click();
+    expect(l.window.location.hash).toBe("#health");
+    expect(l.doc.body.dataset.view).toBe("health");
+    expect(l.doc.querySelector('#sky g.star[data-id="in-h"]')?.classList.contains("away")).toBe(false);
+    expect(l.doc.querySelector('#sky g.star[data-id="free"]')?.classList.contains("away")).toBe(true);
+    expect(l.doc.getElementById("view-line")?.textContent).toBe("Learn, care and understand people.");
+    expect(l.doc.getElementById("settle-action")?.textContent).toBe("Place your star in Health");
+    l.doc.getElementById("back-common")!.click();
+    expect(l.doc.body.dataset.view).toBe("common");
+    expect(l.doc.querySelectorAll("#sky g.star.away")).toHaveLength(0);
+  } finally {
+    l.close();
+  }
+});
+it("a new visitor places a star in the Common Room without choosing a constellation", async () => {
+  const posts: Array<{ url: string; body: string }> = [];
+  const l = await loadLounge();
+  try {
+    Object.assign(l.window, {
+      fetch: async (url: string, init?: { body?: string }) => {
+        posts.push({ url, body: init?.body ?? "" });
+        if (url === "/api/star") return { ok: true, json: async () => ({ star: { id: "mine", x: 0.5, y: 0.5, constellation: null } }) };
+        return { ok: true, json: async () => ({ hasStar: false }) };
+      },
+    });
+    l.doc.getElementById("place-star")!.click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(posts.map((p) => p.url)).toEqual(["/api/star"]);
+    expect(l.doc.body.dataset.constellation).toBe("");
+    expect(l.doc.getElementById("where")?.textContent).toBe("Your star is in the Common Room.");
+    expect(l.doc.querySelector('#sky g.star[data-id="mine"] .star-you')?.textContent).toBe("you");
   } finally {
     l.close();
   }
 });
 
-it("each old-light level draws a different core size", async () => {
-  const levels = ["bright", "soft", "dim", "faint"];
-  const stars = levels.map((b, i) => ({ id: `lvl-${b}`, x: 0.2 + i * 0.2, y: 0.5, brightness: b }));
-  const l = await loadLounge({ sync: { stars, liveStarIds: [] } });
+it("your star can be moved without dragging: Enter, then tap a place", async () => {
+  const { cookie, id } = await newStarCookie();
+  const moves: string[] = [];
+  const l = await loadLounge({ cookie, sync: { stars: [{ id, x: 0.5, y: 0.5, brightness: "bright", constellation: null }, { id: "landmark", x: 0.25, y: 0.75, brightness: "faint", constellation: null }], liveStarIds: [id] } });
   try {
-    const radii = levels.map((b) => Number(l.doc.querySelector(`#sky [data-id="lvl-${b}"] .star-core, #sky .star-core[data-id="lvl-${b}"]`)?.getAttribute("r")));
-    for (const r of radii) expect(r).toBeGreaterThan(0);
-    expect(new Set(radii).size).toBe(levels.length);
-    // Older light is smaller, never larger.
-    for (let i = 1; i < radii.length; i++) expect(radii[i]!).toBeLessThan(radii[i - 1]!);
+    Object.assign(l.window, {
+      fetch: async (url: string, init?: { body?: string }) => {
+        if (url === "/api/star/move") moves.push(init!.body!);
+        return { ok: true, json: async () => ({ star: { id, ...JSON.parse(init?.body ?? "{}"), constellation: null } }) };
+      },
+    });
+    // jsdom has no layout: give the stage a 1000 by 1000 box and re-measure.
+    const stage = l.doc.getElementById("stage")!;
+    (stage as unknown as { getBoundingClientRect: () => object }).getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 1000, right: 1000, bottom: 1000 });
+    l.window.dispatchEvent(new l.window.Event("resize"));
+    await new Promise((r) => setTimeout(r, 20));
+    // The other star is our landmark: (0.25, 0.75) on screen.
+    const landmark = l.doc.querySelector('#sky g.star[data-id="landmark"]') as SVGGElement | null;
+    const at = landmark!.style.transform.match(/translate\(([\d.]+)px, ([\d.]+)px\)/)!;
+    const own = l.doc.querySelector(`#sky g.star[data-id="${id}"]`)!;
+    own.dispatchEvent(new l.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(own.classList.contains("picked")).toBe(true);
+    stage.dispatchEvent(new l.window.MouseEvent("click", { bubbles: true, clientX: Number(at[1]), clientY: Number(at[2]) }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(moves).toHaveLength(1);
+    const moved = JSON.parse(moves[0]!);
+    expect(moved.x).toBeCloseTo(0.25, 2);
+    expect(moved.y).toBeCloseTo(0.75, 2);
   } finally {
     l.close();
   }
 });
-
-it("stars shrink gently as the lounge fills: full size to 20, about 60% at 150", async () => {
-  const make = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `fill-${n}-${i}`, x: (i % 15) / 15, y: Math.floor(i / 15) / 12, brightness: "bright" }));
-  const coreR = async (n: number) => {
-    const l = await loadLounge({ sync: { stars: make(n), liveStarIds: [] } });
-    try {
-      return Number(l.doc.querySelector(`#sky [data-id="fill-${n}-0"] .star-core, #sky .star-core[data-id="fill-${n}-0"]`)?.getAttribute("r"));
-    } finally {
-      l.close();
-    }
-  };
-  const [r1, r20, r150] = [await coreR(1), await coreR(20), await coreR(150)];
-  expect(r20).toBeCloseTo(r1, 6);
-  expect(r150 / r1).toBeGreaterThan(0.55);
-  expect(r150 / r1).toBeLessThan(0.65);
-});
-
-it("the header is centred: label, intro and a small unboxed h1", async () => {
+it("the title: a small label, a serif heading that cannot take focus, and the line", async () => {
   const l = await loadLounge();
   try {
     const app = l.doc.getElementById("sky-app")!;
-    expect(app.querySelector(".lounge-kicker")?.textContent?.trim()).toBe("OVERLAP · ANONYMOUS STUDY LOUNGE");
-    expect(app.querySelector("h1")?.textContent?.trim()).toBe("Overlap");
-    expect(app.querySelector(".lounge-intro")?.textContent?.trim()).toBe("Place your star, settle in, and see that others are quietly here.");
-    // The heading is not focusable, so it can never wear a focus box.
+    expect(app.querySelector(".view-kicker")?.textContent?.trim()).toBe("The Lounge");
+    expect(app.querySelector("h1")?.textContent?.trim()).toBe("The Common Room");
+    expect(app.querySelector("#view-line")?.textContent?.trim()).toBe("Place your star. Settle in. You are not studying alone.");
     expect(app.querySelector("h1")?.hasAttribute("tabindex")).toBe(false);
+    expect(app.querySelector(".wordmark")?.textContent).toBe("Overlap");
   } finally {
     l.close();
   }
 });
-
 it("no focus ring is large or far from its element", async () => {
   const l = await loadLounge();
   try {
@@ -159,10 +277,8 @@ it("no focus ring is large or far from its element", async () => {
 it("the place button shares the arrival button's style, never the browser default", async () => {
   const l = await loadLounge();
   try {
-    const btn = l.doc.getElementById("place-star")!;
-    expect(btn.classList.contains("lounge-button")).toBe(true);
-    const sheet = css(l.html);
-    expect(sheet).toMatch(/#arrival-submit,\s*\.lounge-button\s*\{/);
+    expect(l.doc.getElementById("place-star")!.classList.contains("lounge-button")).toBe(true);
+    expect(css(l.html)).toMatch(/#arrival-submit,\s*\.lounge-button\s*\{/);
   } finally {
     l.close();
   }
@@ -191,7 +307,7 @@ it("your new star stays yours even when its live broadcast arrives before your o
   window.localStorage.setItem("overlap-film-seen", "1");
   const listeners: Record<string, (e: { data: string }) => void> = {};
   let releaseReply: () => void = () => {};
-  const star = { id: "race-star", x: 0.4, y: 0.6, brightness: "bright" };
+  const star = { id: "race-star", x: 0.4, y: 0.6, brightness: "bright", constellation: null };
   Object.assign(window, {
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     CSS: { escape: (s: string) => s },
@@ -212,11 +328,12 @@ it("your new star stays yours even when its live broadcast arrives before your o
     listeners.sync?.({ data: JSON.stringify({ stars: [], liveStarIds: [] }) });
     window.document.getElementById("place-star")!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     listeners.star?.({ data: JSON.stringify({ change: "created", star }) });
+    expect(window.document.querySelector('#sky g.star[data-id="race-star"]')?.getAttribute("data-own")).toBe("false");
     releaseReply();
     await new Promise((r) => setTimeout(r, 20));
     const g = window.document.querySelector('#sky g.star[data-id="race-star"]');
     expect(g?.getAttribute("data-own")).toBe("true");
-    expect(g?.querySelector(".star-you-label")?.textContent).toBe("you");
+    expect(g?.querySelector(".star-you")?.textContent).toBe("you");
     expect(window.document.querySelectorAll("#sky g.star[data-id]")).toHaveLength(1);
   } finally {
     window.close();

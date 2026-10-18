@@ -62,7 +62,10 @@ async function loadSky(opts: {
       // A successful placement, so placeStar runs to the end rather than
       // failing on a missing star before it reaches the live stream.
       if (url === "/api/star") {
-        return { ok: true, json: async () => ({ star: { id: "placed-star", x: 0.5, y: 0.5 } }) };
+        return { ok: true, json: async () => ({ star: { id: "placed-star", x: 0.5, y: 0.5, constellation: null } }) };
+      }
+      if (url === "/api/star/constellation") {
+        return { ok: true, json: async () => ({ star: { id: "placed-star", x: 0.5, y: 0.5, constellation: "science" } }) };
       }
       return { ok: true, json: async () => ({ hasStar: false }) };
     },
@@ -235,10 +238,11 @@ it("a visitor who has already entered never loads the arrival video", async () =
 it("placing a star before entering opens no live stream and does not check in", async () => {
   const sky = await loadSky({ checkedIn: false });
   try {
-    // The arrival covers the place button today; this proves the guard, not
-    // the layout. A star may be saved, but the lounge must not be joined.
-    sky.window.document.getElementById("place-star")?.dispatchEvent(new sky.window.MouseEvent("click", { bubbles: true }));
+    // The arrival covers the Observatory; this proves the guard, not the
+    // layout. A star may be saved, but the lounge must not be joined.
+    sky.window.document.getElementById("place-star")!.dispatchEvent(new sky.window.MouseEvent("click", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sky.posts).toContain("/api/star");
     expect(sky.open()).toHaveLength(0);
     expect(sky.posts).not.toContain("/api/here");
   } finally {

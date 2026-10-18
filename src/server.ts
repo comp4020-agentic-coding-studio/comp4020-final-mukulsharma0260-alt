@@ -10,19 +10,25 @@ import {
   serializeIdentityCookie,
 } from "./cookies.ts";
 import {
+  CONSTELLATIONS,
   createStar,
   getByHash,
+  isConstellation,
+  setConstellation,
+  traceCounts,
   idsSeenSince,
   listAll,
   moveStar,
   openDb,
   touchSeen,
 } from "./db.ts";
-import type { Star } from "./db.ts";
+import type { Constellation, Star } from "./db.ts";
 import { renderHomePage } from "./render.ts";
+import { clampToRegion, settlePosition, spotInRegion } from "./regions.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { oldLight } from "./brightness.ts";
 import { ANONYMOUS, audit, starActor } from "./audit.ts";
+import { BREAK_MODES, isBreakMode, type BreakMode } from "./break.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const DB_PATH = process.env.DB_PATH ?? "/data/stars.db";
@@ -38,6 +44,10 @@ const ASSETS: Record<string, string> = {
   "/assets/arrival-galaxy-v3.png": "image/png",
   "/assets/arrival-nebula-720.webm": "video/webm",
   "/assets/arrival-nebula-720.mp4": "video/mp4",
+  "/assets/arrival-film-music.mp3": "audio/mpeg",
+  "/assets/arrival-film-1080.webm": "video/webm",
+  "/assets/arrival-film-1080.mp4": "video/mp4",
+  ...Object.fromEntries(BREAK_MODES.map((m) => [m.src, "audio/mpeg"])),
 };
 
 const db = openDb(DB_PATH);
@@ -48,6 +58,10 @@ const db = openDb(DB_PATH);
 // that a human is physically present. A restart intentionally clears it.
 const eventStreams = new Set<ServerResponse>();
 const eventStreamsByStarId = new Map<string, Set<ServerResponse>>();
+// Which Break mode a glowing star has pressed Play on. Memory only, like
+// glowing itself: a star stops counting the moment its last visible stream
+// closes, and a restart forgets everyone.
+const listeningByStarId = new Map<string, BreakMode>();
 
 function isUnitInterval(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
@@ -108,6 +122,7 @@ function publicStar(star: Star) {
     x: star.x,
     y: star.y,
     brightness: oldLight(new Date(star.lastSeenAt)),
+    constellation: star.constellation,
   };
 }
 
@@ -118,6 +133,7 @@ function ownStar(star: Star) {
     id: star.id,
     x: star.x,
     y: star.y,
+    constellation: star.constellation,
     createdAt: star.createdAt,
     updatedAt: star.updatedAt,
     lastSeenAt: star.lastSeenAt,
@@ -139,11 +155,45 @@ function broadcast(event: string, body: unknown): void {
   for (const stream of eventStreams) sendEvent(stream, event, body);
 }
 
-function broadcastLiveStars(): void {
-  broadcast("live", { starIds: liveStarIds() });
+// Live counts per constellation: the glowing stars (an open, visible stream)
+// grouped by the area each has chosen. Each star's area is read from SQLite
+// at the moment of counting, so a change of area is reflected at once, and
+// a star that has chosen none glows without counting toward any area.
+function liveByConstellation(): Record<Constellation, number> {
+  const counts = Object.fromEntries(CONSTELLATIONS.map((c) => [c, 0])) as Record<Constellation, number>;
+  const ids = liveStarIds();
+  if (ids.length === 0) return counts;
+  const rows = db
+    .prepare(`SELECT constellation FROM stars WHERE id IN (${ids.map(() => "?").join(",")})`)
+    .all(...ids) as Array<{ constellation: string | null }>;
+  for (const row of rows) if (isConstellation(row.constellation)) counts[row.constellation]++;
+  return counts;
 }
 
-function broadcastStar(change: "created" | "moved", star: Star): void {
+// Listeners per Break mode: only glowing stars can be counted, because a
+// star leaves this map when its last visible stream closes.
+function listeningByMode(): Record<BreakMode, number> {
+  const counts = Object.fromEntries(BREAK_MODES.map((m) => [m.id, 0])) as Record<BreakMode, number>;
+  for (const mode of listeningByStarId.values()) counts[mode]++;
+  return counts;
+}
+
+function liveState() {
+  const traces = traceCounts(db);
+  return {
+    starIds: liveStarIds(),
+    liveByConstellation: liveByConstellation(),
+    tracesByConstellation: traces.byConstellation,
+    unsettledTraces: traces.unsettled,
+    listeningByMode: listeningByMode(),
+  };
+}
+
+function broadcastLiveStars(): void {
+  broadcast("live", liveState());
+}
+
+function broadcastStar(change: "created" | "moved" | "constellation", star: Star): void {
   broadcast("star", { change, star: publicStar(star) });
 }
 
@@ -178,7 +228,8 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
 
   let x: number;
   let y: number;
-  if (b.x === undefined && b.y === undefined) {
+  const placed = !(b.x === undefined && b.y === undefined);
+  if (!placed) {
     x = randomUnit();
     y = randomUnit();
   } else if (isUnitInterval(b.x) && isUnitInterval(b.y)) {
@@ -188,15 +239,30 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
     sendJson(res, 400, { error: "x and y must be numbers between 0 and 1" });
     return;
   }
+  // A first star may be placed straight into a constellation: the same
+  // allowlist as choosing one later, and the same region rule.
+  let constellation: Constellation | null = null;
+  if (b.constellation !== undefined) {
+    if (!isConstellation(b.constellation)) {
+      sendJson(res, 400, { error: `constellation must be one of: ${CONSTELLATIONS.join(", ")}` });
+      return;
+    }
+    constellation = b.constellation;
+  }
 
   const token = generateToken();
   const now = new Date().toISOString();
-  const star = createStar(db, { id: randomUUID(), tokenHash: hashToken(token), x, y, now });
+  const id = randomUUID();
+  // A tap inside the region keeps its place; with no tap, the star gets its
+  // own spot there, so newcomers never stack on one point.
+  if (constellation) ({ x, y } = placed ? settlePosition(constellation, id, x, y) : spotInRegion(constellation, id));
+  const star = createStar(db, { id, tokenHash: hashToken(token), x, y, now, constellation });
 
   res.setHeader("Set-Cookie", serializeIdentityCookie(token, IS_PROD));
   sendJson(res, 201, { star: ownStar(star) });
-  audit({ action: "star.created", actor: starActor(star.id), result: "created" });
+  audit({ action: "star.created", actor: starActor(star.id), result: constellation ?? "created" });
   broadcastStar("created", star);
+  if (constellation) broadcastLiveStars();
 }
 
 async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -219,13 +285,99 @@ async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promis
     return;
   }
 
+  // A settled star stays inside its constellation's region on the shared
+  // map; an unsettled star may go anywhere in the Common Room.
+  const area = identity.star.constellation;
+  const { x, y } = area ? clampToRegion(area, b.x, b.y) : { x: b.x, y: b.y };
   const now = new Date().toISOString();
-  const star = moveStar(db, hashToken(identity.token), b.x, b.y, now)!;
+  const star = moveStar(db, hashToken(identity.token), x, y, now)!;
   sendJson(res, 200, { star: ownStar(star) });
   // Actor and target are both the star the cookie resolved to. Any star id
   // in the body is ignored, so it can never appear here.
   audit({ action: "star.moved", actor: starActor(star.id), target: starActor(star.id), result: "ok" });
   broadcastStar("moved", star);
+}
+
+// A visitor settles their own star into a constellation, or leaves it with
+// { leave: true }. Like a move, the star comes only from the cookie: any star
+// id in the body is ignored. The value must be one of the five; anything else
+// is refused and stores nothing.
+async function handleChooseConstellation(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const identity = identityFromRequest(req);
+  if (!identity) {
+    audit({ action: "star.constellation_denied", actor: ANONYMOUS, result: "no_owned_star" });
+    sendJson(res, 400, { error: "no star to settle" });
+    return;
+  }
+
+  const body = await readJsonBody(req);
+  if (body === undefined) {
+    sendJson(res, 400, { error: "invalid JSON" });
+    return;
+  }
+  const b = body as Record<string, unknown>;
+
+  let next: Constellation | null;
+  if (b.leave === true) {
+    next = null;
+  } else if (isConstellation(b.constellation)) {
+    next = b.constellation;
+  } else {
+    audit({ action: "star.constellation_denied", actor: starActor(identity.star.id), result: "invalid_constellation" });
+    sendJson(res, 400, { error: `constellation must be one of: ${CONSTELLATIONS.join(", ")}` });
+    return;
+  }
+
+  // Settling moves the star into that constellation's region (keeping its
+  // place if it is already inside). Leaving keeps it where it stands, now
+  // free in the Common Room.
+  const current = identity.star;
+  const position = next ? settlePosition(next, current.id, current.x, current.y) : undefined;
+  const star = setConstellation(db, hashToken(identity.token), next, new Date().toISOString(), position)!;
+  sendJson(res, 200, { star: ownStar(star) });
+  audit({
+    action: next ? "star.constellation_changed" : "star.constellation_left",
+    actor: starActor(star.id),
+    target: starActor(star.id),
+    result: next ?? "unsettled",
+  });
+  broadcastStar("constellation", star);
+  broadcastLiveStars();
+}
+
+// A glowing star says which Break mode it pressed Play on, or { mode: null }
+// when it pauses or stops. Only a star with an open, visible stream can be
+// counted, so the count is never more than the glowing stars. Nothing is
+// written to SQLite.
+async function handleListening(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const identity = identityFromRequest(req);
+  if (!identity) {
+    sendJson(res, 400, { error: "no star" });
+    return;
+  }
+  const body = await readJsonBody(req);
+  if (body === undefined) {
+    sendJson(res, 400, { error: "invalid JSON" });
+    return;
+  }
+  const b = body as Record<string, unknown>;
+  if (b.mode !== null && !isBreakMode(b.mode)) {
+    sendJson(res, 400, { error: `mode must be null or one of: ${BREAK_MODES.map((m) => m.id).join(", ")}` });
+    return;
+  }
+  const id = identity.star.id;
+  if (b.mode !== null && !(eventStreamsByStarId.get(id)?.size)) {
+    sendJson(res, 409, { error: "only a glowing star can listen" });
+    return;
+  }
+  const before = listeningByStarId.get(id) ?? null;
+  if (b.mode === null) listeningByStarId.delete(id);
+  else listeningByStarId.set(id, b.mode);
+  sendJson(res, 200, { mode: b.mode });
+  if (before !== b.mode) {
+    audit({ action: b.mode ? "break.listening" : "break.stopped", actor: starActor(id), result: b.mode ?? "stopped" });
+    broadcastLiveStars();
+  }
 }
 
 function handleHere(req: IncomingMessage, res: ServerResponse): void {
@@ -272,9 +424,11 @@ function handleEvents(req: IncomingMessage, res: ServerResponse): void {
   // The snapshot goes out first, then this stream joins the broadcast set.
   // All of this is synchronous, so no event can fall between the two, and
   // the snapshot already includes the live state this stream contributes.
+  const { starIds, ...counts } = liveState();
   sendEvent(res, "sync", {
     stars: listAll(db).map(publicStar),
-    liveStarIds: liveStarIds(),
+    liveStarIds: starIds,
+    ...counts,
   });
   eventStreams.add(res);
   if (wasOffline) broadcastLiveStars();
@@ -295,6 +449,7 @@ function handleEvents(req: IncomingMessage, res: ServerResponse): void {
     streams.delete(res);
     if (streams.size > 0) return;
     eventStreamsByStarId.delete(starId);
+    listeningByStarId.delete(starId);
     broadcastLiveStars();
   };
   req.on("close", close);
@@ -309,7 +464,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && path === "/") {
       const identity = identityFromRequest(req);
       const stars = listAll(db);
-      sendHtml(res, 200, renderHomePage(stars, identity?.star.id, new Date()));
+      sendHtml(res, 200, renderHomePage(stars, identity?.star.id, new Date(), traceCounts(db), liveStarIds()));
     } else if (req.method === "GET" && path === "/readme/") {
       sendHtml(res, 200, renderReadmePage());
     } else if (req.method === "GET" && path === "/sky.js") {
@@ -318,12 +473,30 @@ const server = createServer(async (req, res) => {
       res.end(js);
     } else if (req.method === "GET" && Object.hasOwn(ASSETS, path)) {
       const asset = readFileSync(new URL(`../public${path}`, import.meta.url));
-      res.writeHead(200, {
+      const headers = {
         "Content-Type": ASSETS[path]!,
-        "Content-Length": asset.length,
+        "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=31536000, immutable",
-      });
-      res.end(asset);
+      };
+      // Safari will not play video or audio from a server that ignores byte
+      // ranges, so a single "bytes=a-b" range is honoured; anything else gets
+      // the whole file.
+      const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
+      if (range && (range[1] || range[2])) {
+        const size = asset.length;
+        const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+        const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+        if (start > end || start >= size) {
+          res.writeHead(416, { "Content-Range": `bytes */${size}` });
+          res.end();
+        } else {
+          res.writeHead(206, { ...headers, "Content-Length": end - start + 1, "Content-Range": `bytes ${start}-${end}/${size}` });
+          res.end(asset.subarray(start, end + 1));
+        }
+      } else {
+        res.writeHead(200, { ...headers, "Content-Length": asset.length });
+        res.end(asset);
+      }
     } else if (req.method === "GET" && path === "/events") {
       handleEvents(req, res);
     } else if (req.method === "POST" && path.startsWith("/api/") && !isSameOrigin(req)) {
@@ -332,8 +505,12 @@ const server = createServer(async (req, res) => {
       await handleCreateStar(req, res);
     } else if (req.method === "POST" && path === "/api/star/move") {
       await handleMoveStar(req, res);
+    } else if (req.method === "POST" && path === "/api/star/constellation") {
+      await handleChooseConstellation(req, res);
     } else if (req.method === "POST" && path === "/api/here") {
       handleHere(req, res);
+    } else if (req.method === "POST" && path === "/api/listening") {
+      await handleListening(req, res);
     } else {
       sendJson(res, 404, { error: "not found" });
     }
@@ -341,7 +518,7 @@ const server = createServer(async (req, res) => {
     // Enough to debug, nothing more: the method, which known route failed,
     // and the error's class. Never the message, stack, URL, headers or body,
     // any of which could carry something private.
-    const route = ["/", "/readme/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/here"]
+    const route = ["/", "/readme/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/star/constellation", "/api/here", "/api/listening"]
       .find((r) => req.url?.split("?")[0] === r) ?? "other";
     const kind = err instanceof Error ? err.constructor.name : "unknown";
     console.error(`error method=${req.method ?? "?"} route=${route} kind=${kind}`);

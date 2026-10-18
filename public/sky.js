@@ -1,9 +1,4 @@
-const svg = document.getElementById("sky");
 const statusEl = document.getElementById("status");
-const countEl = document.getElementById("count");
-const liveStatusEl = document.getElementById("live-status");
-const placePrompt = document.getElementById("place-prompt");
-const placeButton = document.getElementById("place-star");
 const arrivalButton = document.getElementById("arrival-submit");
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -12,7 +7,6 @@ const HOUR_MS = 60 * 60 * 1000;
 
 let statusTimer;
 let realtime;
-let liveStarIds = new Set();
 let skyActive = false;
 
 const ARRIVAL_KEY = "overlap-arrival-v2";
@@ -28,12 +22,14 @@ function hasCheckedIn() {
 function saveCheckIn() {
   try {
     // Browser-only arrival state. It deliberately does not create an account,
-    // server identity, or visible name.
+    // server identity, or visible name. A constellation is never kept here:
+    // it lives on the star, in SQLite.
     window.localStorage.setItem(ARRIVAL_KEY, "entered");
   } catch {
-    // A blocked localStorage must not prevent a visitor from using the sky.
+    // A blocked localStorage must not prevent a visitor from using the lounge.
   }
 }
+
 function announce(text, { transient = true } = {}) {
   clearTimeout(statusTimer);
   statusEl.textContent = text;
@@ -42,7 +38,7 @@ function announce(text, { transient = true } = {}) {
   if (transient) {
     statusTimer = setTimeout(() => {
       statusEl.classList.remove("visible");
-    }, 2200);
+    }, 2600);
   }
 }
 
@@ -56,201 +52,576 @@ function clamp01(n) {
   return Math.min(1, Math.max(0, n));
 }
 
-function toSvgPoint(clientX, clientY) {
-  const rect = svg.getBoundingClientRect();
-  return {
-    x: clamp01((clientX - rect.left) / rect.width),
-    y: clamp01((clientY - rect.top) / rect.height),
-  };
-}
-
-// ---- Stars ---------------------------------------------------------------
-// Every star is one <g data-id> placed with a transform, so a move is one
-// attribute and glides with one CSS transition. Inside it: a soft glow and a
-// warm-white core whose size and glow follow old light, plus, while the star
-// is glowing, a pale-blue halo and a breathing ring. The viewer's own star
-// adds a thin ivory ring and a "you" label.
-
-// Core radius and glow radius for each old-light level, at full size.
-const STAR_LIGHT = {
-  bright: { core: 0.0105, glow: 0.034 },
-  soft: { core: 0.0085, glow: 0.026 },
-  dim: { core: 0.0066, glow: 0.018 },
-  faint: { core: 0.005, glow: 0.011 },
-};
-const LEVELS = Object.keys(STAR_LIGHT);
-
-// Stars shrink gently as the lounge fills: full size up to 20, easing down
-// to 60% at 150 and holding there.
-function crowdScale(n) {
-  if (n <= 20) return 1;
-  if (n >= 150) return 0.6;
-  return 1 - 0.4 * ((n - 20) / 130);
-}
-
 function svgEl(tag, attrs) {
   const el = document.createElementNS(SVG_NS, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   return el;
 }
 
-function starTitle(star, own) {
-  if (own) return "Your star";
-  return liveStarIds.has(star.id) ? "Glowing: a browser has this lounge open now" : "A star in the lounge";
+// ---- The lounge -------------------------------------------------------------
+// One full-screen place. The Common Room shows every real star; each
+// constellation is its own full-screen view of only its stars. Every point
+// of light is a real visitor's star, drawn from the server: the page's first
+// paint, then the /events stream. Nothing here is invented, and no
+// constellation choice is kept in this browser.
+
+const AREAS = ["science", "engineering", "business", "health", "arts"];
+// Address-bar names: #arts-society for Arts & Society (#arts still works).
+// Anything else is the Common Room.
+const SLUGS = { science: "science", engineering: "engineering", business: "business", health: "health", arts: "arts-society" };
+const ROUTES = { ...Object.fromEntries(Object.entries(SLUGS).map(([id, slug]) => [slug, id])), arts: "arts" };
+const COMMON_LINE = "Place your star. Settle in. You are not studying alone.";
+
+function readJson(key, fallback) {
+  try {
+    return JSON.parse(document.body.dataset[key] || "null") ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
-function ownStarId() {
-  return svg.querySelector('g.star[data-own="true"]')?.dataset.id;
+const REGIONS = readJson("regions", {});
+const INFO = readJson("constellations", {});
+const INSETS = readJson("insets", { wide: { l: 0.36, r: 0.04, t: 0.07, b: 0.07 }, narrow: { l: 0.06, r: 0.06, t: 0.26, b: 0.34 } });
+
+const svg = document.getElementById("sky");
+const stage = document.getElementById("stage");
+const starsLayer = document.getElementById("stars");
+const figuresLayer = document.getElementById("figures");
+const navLinks = [...document.querySelectorAll(".lounge-nav a.nav-link")];
+const doorways = new Map([...document.querySelectorAll("#regions a.region")].map((a) => [a.dataset.region, a]));
+const doorwayAreas = new Map([...document.querySelectorAll("#regions .region-area")].map((d) => [d.dataset.area, d]));
+
+const SPARKLE = "M0 -15L1.1 -1.1L15 0L1.1 1.1L0 15L-1.1 1.1L-15 0L-1.1 -1.1Z";
+const OWN_STAR_LABEL = "Your star. Drag it, use the arrow keys, or press Enter and then tap a place to move it.";
+const FRAME_HEIGHT = 1000;
+// After the next paint, or at once where there is no painting at all.
+const nextFrame = (fn) => (window.requestAnimationFrame ? window.requestAnimationFrame(fn) : setTimeout(fn, 0));
+
+const stars = new Map();
+// Each star's <g>, by id, so a redraw never searches the DOM per star.
+const starNodes = new Map();
+let liveIds = new Set();
+let liveBy = Object.fromEntries(AREAS.map((a) => [a, Number(doorways.get(a)?.dataset.live ?? 0)]));
+let tracesBy = Object.fromEntries(AREAS.map((a) => [a, Number(doorways.get(a)?.dataset.traces ?? 0)]));
+let listeningBy = {};
+let view = "common";
+
+const ownId = () => document.body.dataset.ownStar || undefined;
+const ownArea = () => document.body.dataset.constellation || null;
+const hasStar = () => document.body.dataset.hasStar === "true";
+
+// The first paint's stars, read back from the server's markup, so the room
+// is whole before the live stream connects.
+for (const g of starsLayer?.querySelectorAll("g.star[data-id]") ?? []) {
+  starNodes.set(g.dataset.id, g);
+  stars.set(g.dataset.id, {
+    id: g.dataset.id,
+    x: Number(g.dataset.x),
+    y: Number(g.dataset.y),
+    brightness: g.dataset.brightness || "faint",
+    constellation: g.dataset.constellation || null,
+  });
+  if (g.dataset.level === "glowing") liveIds.add(g.dataset.id);
 }
 
-// Draws (or redraws) one star's group in place. `scale` is the crowd scale.
-function drawStar(star, scale) {
-  let g = svg.querySelector(starSelector(star.id));
-  // Ownership is decided on every draw, not just when the group is made:
-  // the live broadcast of a visitor's own new star can arrive before their
-  // own placement reply, creating the group as someone else's first.
-  const own = star.own ?? g?.dataset.own === "true";
+function traceText(n) {
+  return n === 0 ? "No traces yet" : n === 1 ? "1 trace" : `${n} traces`;
+}
+
+function applyCounts(data) {
+  const ids = data.starIds ?? data.liveStarIds;
+  if (Array.isArray(ids)) liveIds = new Set(ids);
+  if (data.liveByConstellation) liveBy = { ...liveBy, ...data.liveByConstellation };
+  if (data.tracesByConstellation) tracesBy = { ...tracesBy, ...data.tracesByConstellation };
+  if (data.listeningByMode) listeningBy = { ...data.listeningByMode };
+}
+
+function clampToRegion(area, x, y) {
+  const r = REGIONS[area];
+  if (!r) return { x, y };
+  return { x: Math.min(r.x1, Math.max(r.x0, x)), y: Math.min(r.y1, Math.max(r.y0, y)) };
+}
+
+// Three levels of light: studying now (an entered, visible tab), recent
+// (seen within a day) and a past trace. A star that goes quiet becomes
+// recent, never disappears.
+function levelOf(star) {
+  if (liveIds.has(star.id)) return "glowing";
+  return star.brightness === "bright" || star.brightness === "soft" ? "recent" : "trace";
+}
+
+// ---- The frame: where a stored position is drawn --------------------------
+// The stage fills the screen. Its SVG is FRAME_HEIGHT units tall and as
+// wide as the stage's shape, so stars stay round and nothing is sub-pixel.
+// The visible part of the Common Room (or of one constellation's region) is
+// spread over the stage, inside margins that keep it clear of the title,
+// the dock and the edges. Those margins are measured from the page itself.
+let frame = { w: 1600, h: FRAME_HEIGHT, box: { x0: 0, y0: 0, x1: 1, y1: 1 }, inset: INSETS.wide };
+
+function measureInsets() {
+  const rect = stage?.getBoundingClientRect?.();
+  if (!rect || !rect.width || !rect.height) return null;
+  const hero = document.querySelector(".hero")?.getBoundingClientRect?.();
+  const dock = document.querySelector(".dock")?.getBoundingClientRect?.();
+  const narrow = window.matchMedia?.("(max-width: 960px), (max-aspect-ratio: 1/1)")?.matches ?? false;
+  const pad = 0.035;
+  if (!hero || !dock || !hero.width || !dock.width) return narrow ? INSETS.narrow : INSETS.wide;
+  if (narrow) {
+    return {
+      l: pad,
+      r: pad,
+      t: Math.min(0.5, Math.max(0, (hero.bottom - rect.top) / rect.height) + pad),
+      b: Math.min(0.5, Math.max(0, (rect.bottom - dock.top) / rect.height) + pad),
+    };
+  }
+  return {
+    l: Math.min(0.6, (Math.max(hero.right, dock.right) - rect.left) / rect.width) + pad,
+    r: pad,
+    t: pad * 1.6,
+    b: pad * 1.6,
+  };
+}
+
+function updateFrame() {
+  const rect = stage?.getBoundingClientRect?.();
+  const w = rect && rect.width && rect.height ? Math.round((FRAME_HEIGHT * rect.width) / rect.height) : 1600;
+  const box = view === "common" ? { x0: 0, y0: 0, x1: 1, y1: 1 } : REGIONS[view] ?? { x0: 0, y0: 0, x1: 1, y1: 1 };
+  const inset = measureInsets() ?? INSETS.wide;
+  frame = { w, h: FRAME_HEIGHT, box, inset };
+  svg?.setAttribute("viewBox", `0 0 ${w} ${FRAME_HEIGHT}`);
+}
+
+// Stored fraction (of the Common Room) → SVG units on the stage.
+function toFrame(x, y) {
+  const { w, h, box, inset } = frame;
+  const u = (x - box.x0) / (box.x1 - box.x0 || 1);
+  const v = (y - box.y0) / (box.y1 - box.y0 || 1);
+  // A constellation's region is spread over the available space but kept
+  // in proportion, so its stars are not stretched.
+  const availW = w * (1 - inset.l - inset.r);
+  const availH = h * (1 - inset.t - inset.b);
+  if (view === "common") return { px: w * inset.l + u * availW, py: h * inset.t + v * availH };
+  const aspect = ((box.x1 - box.x0) / (box.y1 - box.y0)) * 1.2;
+  let bw = availW;
+  let bh = bw / aspect;
+  if (bh > availH) {
+    bh = availH;
+    bw = bh * aspect;
+  }
+  const ox = w * inset.l + (availW - bw) / 2;
+  const oy = h * inset.t + (availH - bh) / 2;
+  return { px: ox + u * bw, py: oy + v * bh };
+}
+
+// SVG units on the stage → stored fraction (of the Common Room).
+function fromFrame(px, py) {
+  const a = toFrame(frame.box.x0, frame.box.y0);
+  const b = toFrame(frame.box.x1, frame.box.y1);
+  const u = (px - a.px) / (b.px - a.px || 1);
+  const v = (py - a.py) / (b.py - a.py || 1);
+  return {
+    x: clamp01(frame.box.x0 + u * (frame.box.x1 - frame.box.x0)),
+    y: clamp01(frame.box.y0 + v * (frame.box.y1 - frame.box.y0)),
+  };
+}
+
+function placeNode(g, star) {
+  const { px, py } = toFrame(star.x, star.y);
+  const t = `translate(${Math.round(px)}px, ${Math.round(py)}px)`;
+  if (g.style.transform !== t) g.style.transform = t;
+}
+
+// Draws (or redraws) one star in place. Ownership is decided on every draw:
+// the live broadcast of a visitor's own new star can arrive before their own
+// placement reply.
+function drawStar(star, mine = ownId()) {
+  let g = starNodes.get(star.id);
   if (!g) {
-    g = svgEl("g", { class: "star", "data-id": star.id });
-    svg.appendChild(g);
+    g = svgEl("g", { "data-id": star.id });
+    starsLayer.appendChild(g);
+    starNodes.set(star.id, g);
   }
-  g.dataset.own = own ? "true" : "false";
-  const level = LEVELS.includes(star.brightness) ? star.brightness : "bright";
-  const live = liveStarIds.has(star.id);
-  const light = STAR_LIGHT[level];
-  const core = (own ? Math.max(light.core, STAR_LIGHT.soft.core) : light.core) * scale;
-  const glow = light.glow * scale;
+  const own = star.id === mine;
+  const level = levelOf(star);
+  const away = view !== "common" && star.constellation !== view;
+  // Transient states (picked, dragging, arrived) are kept from the current
+  // class rather than looked up one by one.
+  const was = g.getAttribute("class") ?? "";
+  const keep = ["picked", "dragging", "arrived"].filter((c) => was.includes(` ${c}`)).map((c) => ` ${c}`).join("");
+  const cls = `star ${level}${own ? " own" : ""}${away ? " away" : ""}${keep}`;
+  if (was !== cls) g.setAttribute("class", cls);
+  // With a thousand stars every redraw must stay cheap, so attributes are
+  // only written when they change.
+  const set = (name, value) => {
+    if (value === null) {
+      if (g.hasAttribute(name)) g.removeAttribute(name);
+    } else if (g.getAttribute(name) !== value) {
+      g.setAttribute(name, value);
+    }
+  };
+  set("data-constellation", star.constellation ?? null);
+  set("data-x", String(star.x));
+  set("data-y", String(star.y));
+  set("data-level", level);
+  set("data-brightness", star.brightness ?? "faint");
+  if (!cls.includes(" dragging")) placeNode(g, star);
 
-  g.setAttribute("class", `star ${level}${live ? " live" : ""}${own ? " own" : ""}`);
-  g.dataset.brightness = level;
-  g.setAttribute("transform", `translate(${star.x} ${star.y})`);
-  g.dataset.x = String(star.x);
-  g.dataset.y = String(star.y);
-
+  // Rebuild the star's insides only when its kind has changed; the light
+  // level itself is a class, so going quiet fades rather than jumps.
+  const look = `${level === "glowing"}|${own}`;
+  if (g.getAttribute("data-look") === look) return g;
+  g.setAttribute("data-look", look);
+  g.setAttribute("data-own", String(own));
   g.replaceChildren();
-  if (live) {
-    g.append(svgEl("circle", { class: "star-halo", r: (glow * 1.6).toFixed(5) }));
-    g.append(svgEl("circle", { class: "star-breath", r: (core * 2.4).toFixed(5) }));
-  }
-  g.append(svgEl("circle", { class: "star-glow", r: glow.toFixed(5) }));
-  g.append(svgEl("circle", { class: "star-core", r: core.toFixed(5), "data-id": star.id }));
+  g.append(svgEl("circle", { class: "star-halo", r: 10 }));
+  if (level === "glowing") g.append(svgEl("path", { class: "star-sparkle", d: SPARKLE }));
+  g.append(svgEl("circle", { class: "star-core", r: 1 }));
+  const title = svgEl("title", {});
   if (own) {
-    g.append(svgEl("circle", { class: "star-ring", r: (core * 2.1).toFixed(5) }));
-    const label = svgEl("text", { class: "star-you-label", y: (-core * 2.1 - 0.014).toFixed(5), "text-anchor": "middle" });
-    label.textContent = "you";
-    g.append(label);
+    g.append(svgEl("circle", { class: "star-ring", r: 13 }));
+    const you = svgEl("text", { class: "star-you", y: -21, "text-anchor": "middle" });
+    you.textContent = "you";
+    g.append(you);
     g.setAttribute("tabindex", "0");
     g.setAttribute("role", "button");
-    g.setAttribute("aria-label", "Your star. Drag or use arrow keys to move it. Hold Shift for a bigger step.");
+    g.setAttribute("aria-label", OWN_STAR_LABEL);
+    title.textContent = "Your star";
+  } else {
+    g.removeAttribute("tabindex");
+    g.removeAttribute("role");
+    g.removeAttribute("aria-label");
+    title.textContent = level === "glowing" ? "A visitor studying now" : level === "recent" ? "A visitor, seen recently" : "A past trace";
   }
-  const title = svgEl("title", {});
-  title.textContent = starTitle(star, own);
   g.append(title);
   return g;
 }
 
-function allStars() {
-  return [...svg.querySelectorAll("g.star[data-id]")].map((g) => ({
-    id: g.dataset.id,
-    x: Number(g.dataset.x),
-    y: Number(g.dataset.y),
-    brightness: g.dataset.brightness,
-    own: g.dataset.own === "true",
-  }));
+// Past traces at the back, then recent stars, then glowing ones; your own
+// star on top.
+function rankOf(g) {
+  if (g.getAttribute("data-own") === "true") return 3;
+  return { trace: 0, recent: 1, glowing: 2 }[g.getAttribute("data-level")] ?? 0;
 }
 
-// Redraw every star at the scale for how full the lounge now is.
-function redrawStars() {
-  const stars = allStars();
-  const scale = crowdScale(stars.length);
-  for (const s of stars) drawStar(s, scale);
-  updateCount();
+function orderStars() {
+  const groups = [...starsLayer.children];
+  const ranks = groups.map(rankOf);
+  // Already in order (the usual case): touch nothing.
+  if (ranks.every((r, i) => i === 0 || ranks[i - 1] <= r)) return;
+  const sorted = groups.map((g, i) => [g, ranks[i]]).sort((a, b) => a[1] - b[1]);
+  for (const [g] of sorted) starsLayer.appendChild(g);
 }
 
-// A sync replaces the lounge: draw exactly its stars, and remove any others.
-function replaceStars(stars) {
-  const keep = new Set(stars.map((s) => s.id));
-  for (const g of svg.querySelectorAll("g.star[data-id]")) {
-    if (!keep.has(g.dataset.id)) g.remove();
+// The constellation figures: all five, small, in the Common Room; in a
+// constellation's view only its own, drawn large behind its stars.
+function drawFigures() {
+  if (!figuresLayer) return;
+  const frag = document.createDocumentFragment();
+  for (const id of AREAS) {
+    if (view !== "common" && id !== view) continue;
+    const info = INFO[id];
+    const r = REGIONS[id];
+    if (!info || !r) continue;
+    const g = svgEl("g", { class: `figure${view === id ? " is-room" : ""}`, "data-figure": id });
+    const pt = ([u, w]) => toFrame(r.x0 + (r.x1 - r.x0) * u, r.y0 + (r.y1 - r.y0) * w);
+    for (const [a, b] of info.edges) {
+      const p = pt(info.nodes[a]);
+      const q = pt(info.nodes[b]);
+      g.append(svgEl("line", { class: "fig-edge", x1: Math.round(p.px), y1: Math.round(p.py), x2: Math.round(q.px), y2: Math.round(q.py) }));
+    }
+    const d = view === id ? 9 : 6;
+    for (const n of info.nodes) {
+      const p = pt(n);
+      g.append(svgEl("path", { class: "fig-node", d: `M${Math.round(p.px)} ${Math.round(p.py) - d}l${d} ${d}l-${d} ${d}l-${d} -${d}z` }));
+    }
+    frag.append(g);
   }
-  const scale = crowdScale(stars.length);
-  for (const s of stars) drawStar(s, scale);
-  wireOwnStar();
-  updateCount();
+  figuresLayer.replaceChildren(frag);
 }
 
-// A single change (placed or moved): draw that star; if the count changed,
-// the crowd scale did too, so redraw the rest.
-function updateStarFromServer(star) {
-  const isNew = !svg.querySelector(starSelector(star.id));
-  const g = drawStar(star, crowdScale(svg.querySelectorAll("g.star[data-id]").length + (isNew ? 1 : 0)));
-  if (isNew) redrawStars();
-  return g;
+// Doorways sit over their region of the Common Room, in screen percentages.
+function placeDoorways() {
+  for (const [id, a] of doorways) {
+    const r = REGIONS[id];
+    if (!r) continue;
+    const p = toFrame(r.x0, r.y0);
+    const q = toFrame(r.x1, r.y1);
+    const area = doorwayAreas.get(id);
+    const left = (p.px / frame.w) * 100;
+    const top = (p.py / frame.h) * 100;
+    a.style.left = `${left.toFixed(2)}%`;
+    a.style.top = `${top.toFixed(2)}%`;
+    if (area) {
+      area.style.left = `${left.toFixed(2)}%`;
+      area.style.top = `${top.toFixed(2)}%`;
+      area.style.width = `${(((q.px - p.px) / frame.w) * 100).toFixed(2)}%`;
+      area.style.height = `${(((q.py - p.py) / frame.h) * 100).toFixed(2)}%`;
+    }
+  }
 }
 
-function updateCount() {
-  if (!countEl) return;
-  const n = svg.querySelectorAll("g.star[data-id]").length;
-  countEl.textContent = n === 0 ? "" : n === 1 ? "1 star" : `${n} stars`;
+function renderStars() {
+  for (const [id, g] of starNodes) {
+    if (!stars.has(id)) {
+      g.remove();
+      starNodes.delete(id);
+    }
+  }
+  // Whose star is whose is read once per redraw, not once per star.
+  const mine = ownId();
+  for (const s of stars.values()) drawStar(s, mine);
+  orderStars();
 }
 
-function starSelector(id) {
-  return `g.star[data-id="${CSS.escape(id)}"]`;
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el && el.textContent !== value) el.textContent = value;
+  return el;
 }
 
-function updateLiveStatus(ids) {
-  liveStarIds = new Set(ids);
-  redrawStars();
+// The title, the live line, the doorways, the navigation and the dock: all
+// from the current view and real counts.
+function renderChrome() {
+  const area = ownArea();
+  const inRoom = view !== "common";
+  const name = inRoom ? INFO[view]?.name ?? "" : "";
 
-  if (!liveStatusEl) return;
-  const ownId = ownStarId();
-  const others = [...liveStarIds].filter((id) => id !== ownId).length;
-  liveStatusEl.classList.toggle("connected", Boolean(ownId && liveStarIds.has(ownId)));
-  if (!ownId) {
-    const n = liveStarIds.size;
-    liveStatusEl.textContent = n === 0
-      ? "Place a star to join the lounge."
-      : `${n} ${n === 1 ? "star is" : "stars are"} glowing in the lounge now. Place a star to join.`;
-  } else if (!liveStarIds.has(ownId)) {
-    liveStatusEl.textContent = "Reconnecting to the lounge…";
-  } else if (others === 0) {
-    liveStatusEl.textContent = "Your star is the only one glowing right now.";
+  document.body.dataset.view = view;
+  if (stage) stage.dataset.view = view;
+  for (const a of navLinks) {
+    const current = a.dataset.view === view;
+    if (current) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+    if (a.dataset.view !== "common") {
+      const n = liveBy[a.dataset.view] ?? 0;
+      a.dataset.live = String(n);
+      a.setAttribute("aria-label", `${INFO[a.dataset.view]?.name}, ${n ? `${n} studying now` : "quiet"}`);
+    }
+  }
+  for (const [id, a] of doorways) {
+    const n = liveBy[id] ?? 0;
+    a.dataset.live = String(n);
+    a.classList.toggle("is-yours", area === id);
+    a.querySelector(".region-live").textContent = n ? `${n} studying now` : "Quiet";
+    a.setAttribute("aria-label", `${INFO[id]?.name}: ${n ? `${n} studying now` : "quiet"}. Open ${INFO[id]?.name}.`);
+  }
+
+  setText("view-kicker", inRoom ? "Constellation" : "The Lounge");
+  setText("view-title", inRoom ? name : "The Common Room");
+  setText("view-line", inRoom ? INFO[view]?.line ?? "" : COMMON_LINE);
+  document.getElementById("back-common").hidden = !inRoom;
+
+  const liveTotal = inRoom ? liveBy[view] ?? 0 : liveIds.size;
+  const traceTotal = inRoom ? tracesBy[view] ?? 0 : stars.size;
+  const liveWords = inRoom
+    ? liveTotal ? `${liveTotal} studying in ${name} now` : `Nobody studying in ${name} right now`
+    : liveTotal ? `${liveTotal} studying now` : "Nobody studying right now";
+  const liveLine = setText("live-line", `${liveWords} · ${traceText(traceTotal)}`);
+  if (liveTotal) liveLine.removeAttribute("data-quiet");
+  else liveLine.setAttribute("data-quiet", "");
+
+  svg?.setAttribute("aria-label", inRoom
+    ? `${name}. Every point of light is a real visitor's star in ${name}: bright points are studying now, faint points are past traces.`
+    : "The Common Room. Every point of light is a real visitor's star: bright points are studying now, faint points are past traces.");
+
+  renderDock();
+}
+
+function renderDock() {
+  const area = ownArea();
+  const inRoom = view !== "common";
+  const name = inRoom ? INFO[view]?.name ?? "" : "";
+  const own = stars.get(ownId());
+  const glowing = own ? liveIds.has(own.id) : false;
+
+  const youStatus = document.getElementById("you-status");
+  youStatus.hidden = !hasStar();
+  setText("you-status", glowing ? "Your star is glowing" : "Your star is connecting");
+  setText("where", !hasStar() ? "You have no star yet" : `Your star is in ${area ? INFO[area]?.name : "the Common Room"}.`);
+
+  const place = document.getElementById("place-star");
+  const settle = document.getElementById("settle-action");
+  const leave = document.getElementById("leave-area");
+  place.hidden = hasStar() || inRoom;
+  settle.hidden = true;
+  leave.hidden = true;
+
+  let note;
+  if (!inRoom) {
+    note = hasStar()
+      ? area ? `Your star stays in ${INFO[area]?.name}. Drag it there, or select it and use the arrow keys.` : "Drag your star, or select it and use the arrow keys."
+      : "No name, no profile. Tap an open space, or press the button.";
+  } else if (!hasStar()) {
+    settle.hidden = false;
+    settle.textContent = `Place your star in ${name}`;
+    note = `Your star appears among ${name}'s stars, and in the Common Room.`;
+  } else if (area === view) {
+    leave.hidden = false;
+    leave.textContent = `Leave ${name}`;
+    note = `Drag your star within ${name}, or select it and use the arrow keys.`;
+  } else if (area) {
+    settle.hidden = false;
+    settle.textContent = `Move my star to ${name}`;
+    note = `You still have one star: it moves from ${INFO[area]?.name} to ${name}.`;
   } else {
-    liveStatusEl.textContent = `${others} other ${others === 1 ? "star is" : "stars are"} glowing right now.`;
+    settle.hidden = false;
+    settle.textContent = `Study in ${name}`;
+    note = `Your one star moves into ${name}. It stays in the Common Room too.`;
+  }
+  if (area && !inRoom) {
+    leave.hidden = false;
+    leave.textContent = `Leave ${INFO[area]?.name}`;
+  }
+  setText("dock-note", note);
+}
+
+function render() {
+  renderStars();
+  renderChrome();
+}
+
+// Re-measure and redraw everything that depends on the stage's shape.
+function relayout() {
+  updateFrame();
+  drawFigures();
+  placeDoorways();
+  for (const s of stars.values()) {
+    const g = starNodes.get(s.id);
+    if (g && !g.classList.contains("dragging")) placeNode(g, s);
   }
 }
 
+// ---- Views ----------------------------------------------------------------
+// The Common Room and the five constellations are views of the same stars.
+// Changing view flies the stars to their new places (and fades out those
+// that are not in it) instead of loading another page.
+function setView(next, { push = true } = {}) {
+  const target = next && AREAS.includes(next) ? next : "common";
+  const changed = target !== view;
+  view = target;
+  if (push) {
+    const hash = view === "common" ? "" : `#${SLUGS[view]}`;
+    if (window.location.hash !== hash) {
+      window.history.pushState(null, "", hash || window.location.pathname + window.location.search);
+    }
+  }
+  if (changed && skyActive && !reducedMotion) {
+    stage?.classList.add("flying");
+    clearTimeout(setView.timer);
+    setView.timer = setTimeout(() => stage?.classList.remove("flying"), 1000);
+  }
+  setPicked(false);
+  updateFrame();
+  render();
+  drawFigures();
+  placeDoorways();
+  // On a narrow screen the navigation scrolls sideways: keep the current
+  // view's link in sight.
+  if (changed) navLinks.find((a) => a.dataset.view === view)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+}
 
+function routeFromHash() {
+  const slug = decodeURIComponent(window.location.hash.replace(/^#/, "")).toLowerCase();
+  setView(ROUTES[slug] ?? null, { push: false });
+}
+
+window.addEventListener("popstate", routeFromHash);
+window.addEventListener("hashchange", routeFromHash);
+
+// ---- Joining a constellation -----------------------------------------------
+async function chooseConstellation(body) {
+  let res;
+  try {
+    res = await fetch("/api/star/constellation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    announceError("Could not reach the lounge. Check your connection and try again.");
+    return false;
+  }
+  if (!res.ok) {
+    announceError("That did not save. Please try again.");
+    return false;
+  }
+  const { star } = await res.json();
+  // The server decides where the star is now (inside the region it chose).
+  document.body.dataset.constellation = star.constellation ?? "";
+  stars.set(star.id, { ...stars.get(star.id), id: star.id, x: star.x, y: star.y, constellation: star.constellation ?? null, brightness: "bright" });
+  render();
+  return true;
+}
+
+async function settleIn(area) {
+  if (!hasStar()) {
+    // No position: the server gives the new star its own spot in the region.
+    if (await placeStar(undefined, undefined, area)) {
+      announce(`Your star is in ${INFO[area]?.name} now.`);
+    }
+    return;
+  }
+  if (await chooseConstellation({ constellation: area })) {
+    announce(`Your star is in ${INFO[area]?.name} now.`);
+    starNodes.get(ownId())?.focus();
+  }
+}
+
+async function leaveConstellation() {
+  const area = ownArea();
+  if (await chooseConstellation({ leave: true })) {
+    announce(area ? `Your star left ${INFO[area]?.name}. It is in the Common Room.` : "Your star is in the Common Room.");
+    if (view !== "common") setView(null);
+  }
+}
+
+// ---- Live stream ------------------------------------------------------------
 function startRealtime() {
   realtime?.close();
   realtime = new EventSource("/events");
 
   realtime.addEventListener("sync", (event) => {
-    // A sync replaces the lounge: exactly its stars, and no stale ones.
+    // A sync replaces what this browser knows: exactly its stars and counts.
     const data = JSON.parse(event.data);
-    liveStarIds = new Set(data.liveStarIds ?? []);
-    replaceStars(data.stars ?? []);
-    updateLiveStatus(data.liveStarIds ?? []);
+    stars.clear();
+    for (const s of data.stars ?? []) stars.set(s.id, s);
+    applyCounts(data);
+    render();
+    renderBreak();
   });
   realtime.addEventListener("star", (event) => {
-    const { star } = JSON.parse(event.data);
-    ringPulse(updateStarFromServer(star));
+    const { change, star } = JSON.parse(event.data);
+    if (!star?.id) return;
+    // While you drag your own star, your pointer leads; your own move
+    // coming back must not snap it.
+    if (star.id === ownId() && dragging) return;
+    stars.set(star.id, { ...stars.get(star.id), ...star });
+    if (star.id === ownId()) document.body.dataset.constellation = star.constellation ?? "";
+    render();
+    if (change === "created") arrive(star.id);
   });
   realtime.addEventListener("live", (event) => {
-    updateLiveStatus(JSON.parse(event.data).starIds ?? []);
+    applyCounts(JSON.parse(event.data));
+    render();
+    renderBreak();
   });
   realtime.addEventListener("error", () => {
-    if (liveStatusEl) {
-      liveStatusEl.classList.remove("connected");
-      liveStatusEl.textContent = "Reconnecting to the lounge…";
-    }
+    setText("live-line", "Reconnecting to the lounge…");
   });
+}
+
+function arrive(id) {
+  if (reducedMotion) return;
+  const g = starNodes.get(id);
+  g?.classList.add("arrived");
+  setTimeout(() => g?.classList.remove("arrived"), 1600);
 }
 
 // Live means an open AND visible tab that has entered the lounge (ADRs 0005
 // and 0006). A hidden tab drops its stream, so its glow goes out on the
-// server; showing the tab again reconnects, gets a fresh snapshot, and checks
-// in like a return visit.
+// server and every count drops with it; showing the tab again reconnects,
+// gets a fresh snapshot, and checks in like a return visit.
 function stopRealtime() {
   realtime?.close();
   realtime = undefined;
@@ -263,6 +634,8 @@ function joinLounge({ checkIn = true } = {}) {
   if (!skyActive || document.visibilityState === "hidden") return;
   startRealtime();
   if (checkIn) reportHere();
+  // A visible tab that is still playing counts as listening again.
+  if (breakPlaying()) reportListening(breakMode);
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -272,12 +645,6 @@ document.addEventListener("visibilitychange", () => {
   }
   joinLounge();
 });
-
-function ringPulse(g) {
-  if (reducedMotion || !g) return;
-  g.classList.add("new-ring");
-  setTimeout(() => g.classList.remove("new-ring"), 1600);
-}
 
 function relativeTime(iso) {
   const ms = Date.now() - new Date(iso).getTime();
@@ -292,125 +659,208 @@ function relativeTime(iso) {
   return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
 }
 
+// ---- Placing and moving your own star -----------------------------------
+// Three ways, so dragging is never the only one: drag it; select it and use
+// the arrow keys (Shift for a bigger step); or select it with Enter or a
+// tap, then tap a place. A star in a constellation stays inside it here as
+// it does on the server.
+
+let dragging = false;
+let picked = false;
+
+function toStagePoint(clientX, clientY) {
+  const pt = svg?.createSVGPoint?.();
+  const ctm = svg?.getScreenCTM?.();
+  if (pt && ctm) {
+    pt.x = clientX;
+    pt.y = clientY;
+    const p = pt.matrixTransform(ctm.inverse());
+    return fromFrame(p.x, p.y);
+  }
+  const rect = stage.getBoundingClientRect();
+  return fromFrame(((clientX - rect.left) / (rect.width || 1)) * frame.w, ((clientY - rect.top) / (rect.height || 1)) * frame.h);
+}
+
+function postMove(x, y) {
+  return fetch("/api/star/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ x, y }),
+  }).then(async (res) => {
+    if (!res.ok) throw new Error("move failed");
+    // The server's answer is where the star really is.
+    const { star } = await res.json();
+    if (star && !dragging) {
+      stars.set(star.id, { ...stars.get(star.id), x: star.x, y: star.y, constellation: star.constellation ?? null });
+      drawStar(stars.get(star.id));
+    }
+  });
+}
+
 let saveTimer;
 function saveMove(x, y) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    fetch("/api/star/move", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ x, y }),
-    }).catch(() => {
+    postMove(x, y).catch(() => {
       announceError("Could not save your star's new position. Check your connection and try again.");
     });
   }, 300);
 }
 
-// Move the viewer's own star locally (no glide while dragging: it follows the
-// pointer), keeping its stored position in step for the next redraw.
-function moveOwnStar(g, x, y) {
-  g.dataset.x = String(x);
-  g.dataset.y = String(y);
-  g.setAttribute("transform", `translate(${x} ${y})`);
+function moveOwnLocally(x, y) {
+  const star = stars.get(ownId());
+  if (!star) return { x, y };
+  const p = star.constellation ? clampToRegion(star.constellation, x, y) : { x, y };
+  Object.assign(star, p);
+  const g = starNodes.get(star.id);
+  if (g) {
+    placeNode(g, star);
+    g.dataset.x = String(p.x);
+    g.dataset.y = String(p.y);
+  }
+  return p;
 }
 
-// Pointer, touch and keyboard moving for the viewer's own star. Listeners
-// live on the svg and find the own star each time, because a redraw replaces
-// its children but keeps the group.
-let ownStarWired = false;
-function wireOwnStar() {
-  if (ownStarWired) return;
-  ownStarWired = true;
-  let dragging = false;
-  const own = () => svg.querySelector('g.star[data-own="true"]');
+function setPicked(on) {
+  if (picked === on) return;
+  picked = on;
+  starNodes.get(ownId())?.classList.toggle("picked", on);
+  stage?.classList.toggle("placing", on);
+  if (on) announce("Tap a place to move your star there. Press Escape to cancel.", { transient: false });
+}
 
-  svg.addEventListener("pointerdown", (e) => {
+// Can this visitor's star be shown in the current view?
+function ownStarInView() {
+  return view === "common" || ownArea() === view;
+}
+
+function wireStage() {
+  const own = () => starNodes.get(ownId());
+
+  stage.addEventListener("pointerdown", (e) => {
     const g = own();
-    if (!g || !g.contains(e.target)) return;
+    if (!g || !g.contains(e.target) || !ownStarInView()) return;
     dragging = true;
-    svg.setPointerCapture?.(e.pointerId);
+    stage.setPointerCapture?.(e.pointerId);
     g.classList.add("dragging");
+    g.dataset.dragStart = `${e.clientX},${e.clientY}`;
   });
 
-  svg.addEventListener("pointermove", (e) => {
+  stage.addEventListener("pointermove", (e) => {
     if (!dragging) return;
-    const { x, y } = toSvgPoint(e.clientX, e.clientY);
-    moveOwnStar(own(), x, y);
-    saveMove(x, y);
+    const { x, y } = toStagePoint(e.clientX, e.clientY);
+    moveOwnLocally(x, y);
   });
 
-  function endDrag() {
+  function endDrag(e) {
     if (!dragging) return;
     dragging = false;
     const g = own();
-    g.classList.remove("dragging");
-    const x = Number(g.dataset.x);
-    const y = Number(g.dataset.y);
+    g?.classList.remove("dragging");
+    const [sx, sy] = (g?.dataset.dragStart ?? "0,0").split(",").map(Number);
+    const moved = Math.hypot((e?.clientX ?? sx) - sx, (e?.clientY ?? sy) - sy) > 4;
+    if (!moved) {
+      // A tap on your star selects it for tap-to-move.
+      setPicked(!picked);
+      return;
+    }
+    const star = stars.get(ownId());
+    if (!star) return;
     clearTimeout(saveTimer);
-    fetch("/api/star/move", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ x, y }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("move failed");
-        announce("Star moved.");
-      })
-      .catch(() => {
-        announceError("Could not save your star's new position. Check your connection and try again.");
-      });
+    postMove(star.x, star.y)
+      .then(() => announce("Star moved."))
+      .catch(() => announceError("Could not save your star's new position. Check your connection and try again."));
   }
+  stage.addEventListener("pointerup", endDrag);
+  stage.addEventListener("pointercancel", () => endDrag());
 
-  svg.addEventListener("pointerup", endDrag);
-  svg.addEventListener("pointercancel", endDrag);
+  // A click on open space: place a first star there, or move a selected star.
+  stage.addEventListener("click", (e) => {
+    if (own()?.contains(e.target) || e.target.closest?.("a")) return;
+    const { x, y } = toStagePoint(e.clientX, e.clientY);
+    if (!hasStar()) {
+      // In a constellation's view the first star joins it, wherever the tap.
+      if (view === "common") placeStar(x, y);
+      else placeStar(...Object.values(clampToRegion(view, x, y)), view);
+      return;
+    }
+    if (!picked) return;
+    setPicked(false);
+    const p = moveOwnLocally(x, y);
+    postMove(p.x, p.y)
+      .then(() => announce("Star moved."))
+      .catch(() => announceError("Could not save your star's new position. Check your connection and try again."));
+  });
 
-  svg.addEventListener("keydown", (e) => {
+  stage.addEventListener("keydown", (e) => {
     const g = own();
-    if (!g || e.target !== g) return;
-    const step = e.shiftKey ? 0.1 : 0.02;
-    let x = Number(g.dataset.x);
-    let y = Number(g.dataset.y);
-    if (e.key === "ArrowLeft") x = clamp01(x - step);
-    else if (e.key === "ArrowRight") x = clamp01(x + step);
-    else if (e.key === "ArrowUp") y = clamp01(y - step);
-    else if (e.key === "ArrowDown") y = clamp01(y + step);
+    const star = stars.get(ownId());
+    if (!g || !star || e.target !== g) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setPicked(!picked);
+      return;
+    }
+    if (e.key === "Escape" && picked) {
+      e.preventDefault();
+      setPicked(false);
+      announce("Move cancelled.");
+      return;
+    }
+    // Steps are a share of what is on screen, so a key press moves the star
+    // about the same distance in the Common Room and in a constellation.
+    const spanX = frame.box.x1 - frame.box.x0;
+    const spanY = frame.box.y1 - frame.box.y0;
+    const step = e.shiftKey ? 0.08 : 0.02;
+    let { x, y } = star;
+    if (e.key === "ArrowLeft") x = clamp01(x - step * spanX);
+    else if (e.key === "ArrowRight") x = clamp01(x + step * spanX);
+    else if (e.key === "ArrowUp") y = clamp01(y - step * spanY);
+    else if (e.key === "ArrowDown") y = clamp01(y + step * spanY);
     else return;
     e.preventDefault();
-    moveOwnStar(g, x, y);
-    saveMove(x, y);
+    const p = moveOwnLocally(x, y);
+    saveMove(p.x, p.y);
     announce("Star moved.");
   });
 }
 
-async function placeStar(x, y) {
-  const body = x === undefined ? "{}" : JSON.stringify({ x, y });
+// Places this browser's one star: in the Common Room, or straight into a
+// constellation when one is given. Returns true once it exists. A star
+// placed before entering is saved, but the lounge is only joined after
+// entering.
+async function placeStar(x, y, constellation) {
+  const payload = {};
+  if (x !== undefined) Object.assign(payload, { x, y });
+  if (constellation) payload.constellation = constellation;
   let res;
   try {
     res = await fetch("/api/star", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body,
+      body: JSON.stringify(payload),
     });
   } catch {
     announceError("Could not place your star. Check your connection and try again.");
-    return;
+    return false;
   }
   if (!res.ok) {
     announceError("Could not place your star. Please try again.");
-    return;
+    return false;
   }
   const { star } = await res.json();
-
   document.body.dataset.hasStar = "true";
-  // A just-placed star is bright: it was seen this moment.
-  const g = updateStarFromServer({ id: star.id, x: star.x, y: star.y, brightness: "bright", own: true });
-  wireOwnStar();
-  ringPulse(g);
-  announce("Your star joined the lounge.");
-  placePrompt?.remove();
-  g.focus();
+  document.body.dataset.ownStar = star.id;
+  document.body.dataset.constellation = star.constellation ?? "";
+  // Ownership comes from this reply, never from the broadcast.
+  stars.set(star.id, { ...stars.get(star.id), id: star.id, x: star.x, y: star.y, brightness: "bright", constellation: star.constellation ?? null });
+  render();
+  arrive(star.id);
+  announce(constellation ? `Your star joined ${INFO[constellation]?.name}.` : "Your star joined the Common Room.");
+  starNodes.get(star.id)?.focus();
   // Reconnect so the stream now carries this browser's own star as live.
   joinLounge({ checkIn: false });
+  return true;
 }
 
 // A check-in counts this browser's own star as seen, so it is only for a
@@ -440,17 +890,148 @@ async function reportHere() {
         : `${data.newCount} new stars since.`;
     announce(`Welcome back. ${sincePart} ${newPart}`.trim(), { transient: false });
   }
+  for (const id of data.newStarIds ?? []) arrive(id);
+}
 
-  for (const id of data.newStarIds ?? []) {
-    ringPulse(svg.querySelector(starSelector(id)));
-  }
+// ---- Break ------------------------------------------------------------------
+// A small drawer of real tracks. Nothing plays until the visitor presses
+// Play, one track plays at a time, and while it plays this browser tells the
+// server which mode, so "N listening now" is made only of glowing stars that
+// pressed Play. Each visitor plays their own copy: nothing is synchronised.
 
-  // Checking in brightens the viewer's own star: it was seen just now.
-  const own = svg.querySelector('g.star[data-own="true"]');
-  if (own) {
-    own.dataset.brightness = "bright";
-    redrawStars();
+const breakToggle = document.getElementById("break-toggle");
+const breakPanel = document.getElementById("break-panel");
+const breakAudio = document.getElementById("break-audio");
+const breakPlay = document.getElementById("break-play");
+const breakMute = document.getElementById("break-mute");
+const breakVolume = document.getElementById("break-volume");
+const breakModes = [...document.querySelectorAll(".break-mode")];
+let breakMode = breakModes[0]?.dataset.mode ?? null;
+let breakReported = null;
+
+const breakName = (mode) => breakModes.find((b) => b.dataset.mode === mode)?.querySelector(".break-mode-name")?.textContent ?? "";
+const breakPlaying = () => Boolean(breakAudio && breakAudio.getAttribute("src") && !breakAudio.paused);
+
+function reportListening(mode) {
+  if (!hasStar() || !skyActive) return;
+  if (breakReported === mode) return;
+  breakReported = mode;
+  fetch("/api/listening", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  }).catch(() => {});
+}
+
+function renderBreak() {
+  if (!breakPanel) return;
+  const playing = breakPlaying();
+  for (const b of breakModes) {
+    const selected = b.dataset.mode === breakMode;
+    b.setAttribute("aria-pressed", String(selected));
+    b.querySelector(".break-mode-state").textContent = selected && playing ? "Playing" : "";
+    const n = listeningBy[b.dataset.mode] ?? 0;
+    const count = b.querySelector(".break-mode-count");
+    count.hidden = n === 0;
+    count.textContent = n ? `${n} listening` : "";
   }
+  const total = Object.values(listeningBy).reduce((a, n) => a + (Number(n) || 0), 0);
+  const totalEl = document.getElementById("break-listening-total");
+  totalEl.hidden = total === 0;
+  totalEl.textContent = total ? `${total} listening now` : "";
+  breakPlay.setAttribute("aria-pressed", String(playing));
+  breakPlay.lastChild.textContent = playing ? "Pause" : "Play";
+  breakPlay.setAttribute("aria-label", playing ? `Pause ${breakName(breakMode)}` : `Play ${breakName(breakMode)}`);
+  breakMute.setAttribute("aria-pressed", String(breakAudio.muted));
+  breakMute.textContent = breakAudio.muted ? "Unmute" : "Mute";
+  breakToggle?.classList.toggle("is-playing", playing);
+  const src = breakAudio.getAttribute("src");
+  setText("break-now", !src ? (breakRendered.stopped ? "Stopped" : "Nothing playing") : playing ? `Playing ${breakName(breakMode)}` : `Paused · ${breakName(breakMode)}`);
+}
+const breakRendered = { stopped: false };
+
+function breakSrc(mode) {
+  return breakModes.find((b) => b.dataset.mode === mode)?.dataset.src;
+}
+
+function playBreak() {
+  const src = breakSrc(breakMode);
+  if (!src) return;
+  if (breakAudio.getAttribute("src") !== src) {
+    breakAudio.setAttribute("src", src);
+    breakAudio.load?.();
+  }
+  breakRendered.stopped = false;
+  breakAudio.play()?.catch?.(() => announceError("That track could not play. Please try again."));
+}
+
+function openBreak(open) {
+  breakPanel.hidden = !open;
+  breakToggle.setAttribute("aria-expanded", String(open));
+  if (open) {
+    renderBreak();
+    (breakModes.find((b) => b.dataset.mode === breakMode) ?? breakPlay)?.focus();
+  } else {
+    breakToggle.focus();
+  }
+}
+
+function wireBreak() {
+  if (!breakPanel) return;
+  breakAudio.volume = Number(breakVolume.value) / 100;
+  breakToggle.addEventListener("click", () => openBreak(breakPanel.hidden));
+  document.getElementById("break-close").addEventListener("click", () => openBreak(false));
+  for (const b of breakModes) {
+    b.addEventListener("click", () => {
+      const wasPlaying = breakPlaying();
+      breakMode = b.dataset.mode;
+      // Choosing another mode swaps the one track: it plays only if music
+      // was already playing, so choosing alone never starts sound.
+      if (wasPlaying) playBreak();
+      renderBreak();
+    });
+  }
+  breakPlay.addEventListener("click", () => {
+    if (breakPlaying()) breakAudio.pause();
+    else playBreak();
+  });
+  document.getElementById("break-stop").addEventListener("click", () => {
+    breakAudio.pause();
+    breakAudio.removeAttribute("src");
+    breakAudio.load?.();
+    breakRendered.stopped = true;
+    reportListening(null);
+    renderBreak();
+  });
+  breakMute.addEventListener("click", () => {
+    breakAudio.muted = !breakAudio.muted;
+    renderBreak();
+  });
+  breakVolume.addEventListener("input", () => {
+    breakAudio.volume = Number(breakVolume.value) / 100;
+  });
+  breakAudio.addEventListener("play", () => {
+    reportListening(breakMode);
+    renderBreak();
+  });
+  breakAudio.addEventListener("pause", () => {
+    reportListening(null);
+    renderBreak();
+  });
+  breakAudio.addEventListener("error", () => {
+    if (breakAudio.getAttribute("src")) announceError("That track could not load.");
+  });
+}
+
+// ---- Traces -----------------------------------------------------------------
+function wireTraces() {
+  const toggle = document.getElementById("traces-toggle");
+  toggle?.addEventListener("click", () => {
+    const on = toggle.getAttribute("aria-pressed") !== "true";
+    toggle.setAttribute("aria-pressed", String(on));
+    stage?.classList.toggle("hide-traces", !on);
+    announce(on ? "Showing past traces." : "Showing only recent stars and those studying now.");
+  });
 }
 
 function localizeSinceDate() {
@@ -460,6 +1041,7 @@ function localizeSinceDate() {
   if (!iso) return;
   time.textContent = new Intl.DateTimeFormat("en-AU", { dateStyle: "long" }).format(new Date(iso));
 }
+
 
 // The arrival video is decoration, so it is the last thing to load: only
 // after the page itself has loaded, never under reduced motion, Save-Data or
@@ -494,17 +1076,21 @@ function stopArrivalVideo() {
 }
 
 // ---- The arrival film -----------------------------------------------------
-// A first entry plays a 30-second film before the lounge opens: a warp drawn
-// in code on a canvas, with a soft generated pad. Nothing is downloaded for
-// it. The visitor only counts as glowing once the lounge opens (joinLounge),
+// A first entry plays a 30-second film before the lounge opens: the author's
+// Luna AI video, full-screen and silent, over the arrival's galaxy, with the
+// author's own music. The cloud and the music are downloaded only after
+// Enter. The visitor only counts as glowing once the lounge opens (joinLounge),
 // never during the film. Later entries, and reduced motion, skip it.
 
 const FILM_MS = 30_000;
 const FILM_SEEN_KEY = "overlap-film-seen";
 const FILM_MUTED_KEY = "overlap-film-muted";
+// Shown in this order. Six 5-second slots fit in the film, so the first two
+// share the opening slot and "Settling in…" is the last thing read.
 const FILM_LINES = [
   "Leaving the noise behind…",
   "Finding a quiet corner…",
+  "This is a small experience before you enter the lounge…",
   "Making space to focus…",
   "Nobody here needs a name…",
   "Somewhere, someone else is studying too…",
@@ -513,7 +1099,7 @@ const FILM_LINES = [
 const LINE_MS = 5_000;
 
 const filmEl = document.getElementById("arrival-film");
-const filmCanvas = document.getElementById("film-canvas");
+const filmCloud = document.querySelector("#arrival-film .film-cloud");
 const filmLine = document.getElementById("film-line");
 const filmFill = document.getElementById("film-bar-fill");
 const filmBar = document.querySelector("#arrival-film .film-bar");
@@ -524,7 +1110,6 @@ const filmSound = document.getElementById("film-sound");
 let filming = false;
 let filmStartedAt = 0;
 let filmTimers = [];
-let filmFrame;
 let filmAudio;
 
 function readFlag(key) {
@@ -544,129 +1129,32 @@ function writeFlag(key, on) {
   }
 }
 
-// --- Warp, drawn in code ---------------------------------------------------
-// Streaks start near the galaxy's bright core and rush outward, accelerating
-// slowly over the 30 seconds. Each streak is respawned at the core when it
-// leaves the screen, so the flight never loops or seams.
-const WARP_COLOURS = ["#9fb4ff", "#b49cff", "#c8d2ff", "#f6efe2", "#f6efe2", "#ffc98a"];
-let warp;
-
-function sizeCanvas() {
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.max(1, Math.round(filmCanvas.clientWidth * ratio));
-  const h = Math.max(1, Math.round(filmCanvas.clientHeight * ratio));
-  if (filmCanvas.width !== w || filmCanvas.height !== h) {
-    filmCanvas.width = w;
-    filmCanvas.height = h;
+// --- The moving cloud -----------------------------------------------------
+// The galaxy picture is already loaded by the arrival; the film video
+// over it is fetched only once the film starts, and fades in once playing.
+function startCloud() {
+  if (!filmCloud) return;
+  for (const source of filmCloud.querySelectorAll("source[data-src]")) {
+    if (!source.getAttribute("src")) source.setAttribute("src", source.dataset.src);
   }
-  return { w, h, ratio };
+  filmCloud.muted = true;
+  filmCloud.addEventListener("playing", () => filmCloud.classList.add("playing"), { once: true });
+  filmCloud.load();
+  filmCloud.play()?.catch(() => {});
 }
 
-function spawnStreak(s, fresh) {
-  s.angle = Math.random() * Math.PI * 2;
-  s.depth = fresh ? Math.random() : 0.02 + Math.random() * 0.05;
-  s.speed = 0.6 + Math.random() * 0.8;
-  s.colour = WARP_COLOURS[Math.floor(Math.random() * WARP_COLOURS.length)];
-  s.width = 0.6 + Math.random() * 1.2;
-  return s;
+function stopCloud() {
+  if (filmCloud && !filmCloud.paused) filmCloud.pause();
 }
 
-// Animation frames where the browser has them, a timer where it does not, so
-// a missing API can never trap a visitor in the film.
-const nextFrame = window.requestAnimationFrame
-  ? (cb) => window.requestAnimationFrame(cb)
-  : (cb) => setTimeout(() => cb(performance.now()), 16);
-const cancelFrame = window.cancelAnimationFrame
-  ? (id) => window.cancelAnimationFrame(id)
-  : (id) => clearTimeout(id);
-
-function startWarp() {
-  const ctx = filmCanvas.getContext?.("2d");
-  if (!ctx) return;
-  warp = { ctx, streaks: Array.from({ length: 220 }, () => spawnStreak({}, true)), last: performance.now() };
-  runWarp();
-}
-
-function runWarp() {
-  if (!warp || filmFrame !== undefined) return;
-  warp.last = performance.now();
-  const frame = (now) => {
-    if (!filming) return;
-    const dt = Math.min(0.05, (now - warp.last) / 1000);
-    warp.last = now;
-    drawWarp(dt);
-    filmFrame = nextFrame(frame);
-  };
-  filmFrame = nextFrame(frame);
-}
-
-function drawWarp(dt) {
-  const { ctx } = warp;
-  const { w, h, ratio } = sizeCanvas();
-  // The galaxy's bright core sits up and to the right in the arrival image;
-  // the flight heads there.
-  const cx = w * 0.62;
-  const cy = h * 0.4;
-  const reach = Math.hypot(w, h) * 0.75;
-  // filmStartedAt is a Date.now() time, so progress must use the same clock.
-  const progress = Math.min(1, Math.max(0, (Date.now() - filmStartedAt) / FILM_MS));
-  const pace = 0.12 + progress * progress * 0.55;
-
-  // Trails: fade the last frame instead of clearing it.
-  ctx.fillStyle = "rgba(2, 3, 12, 0.26)";
-  ctx.fillRect(0, 0, w, h);
-
-  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, reach * (0.22 + progress * 0.12));
-  core.addColorStop(0, "rgba(255, 244, 226, 0.5)");
-  core.addColorStop(0.25, "rgba(176, 156, 255, 0.18)");
-  core.addColorStop(1, "rgba(20, 22, 60, 0)");
-  ctx.fillStyle = core;
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.lineCap = "round";
-  for (const s of warp.streaks) {
-    const before = s.depth;
-    s.depth += dt * pace * s.speed * (0.4 + s.depth * 2.2);
-    if (s.depth > 1.15) {
-      spawnStreak(s, false);
-      continue;
-    }
-    const r0 = before * before * reach;
-    const r1 = s.depth * s.depth * reach;
-    ctx.globalAlpha = Math.min(1, s.depth * 1.6);
-    ctx.strokeStyle = s.colour;
-    ctx.lineWidth = s.width * ratio * (0.4 + s.depth * 1.4);
-    ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(s.angle) * r0, cy + Math.sin(s.angle) * r0);
-    ctx.lineTo(cx + Math.cos(s.angle) * r1, cy + Math.sin(s.angle) * r1);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function stopWarp() {
-  if (filmFrame !== undefined) cancelFrame(filmFrame);
-  filmFrame = undefined;
-}
-
-// --- Music, generated with Web Audio ---------------------------------------
-// A slow pad: a few soft sine voices on a pentatonic scale, through a
-// low-pass filter and a generated reverb, swelling gently. Film only.
-const PENTATONIC_HZ = [196.0, 220.0, 261.63, 293.66, 329.63, 392.0];
-const MUSIC_LEVEL = 0.07;
-
-function makeReverb(ctx) {
-  const seconds = 3.5;
-  const length = Math.floor(ctx.sampleRate * seconds);
-  const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
-  for (let ch = 0; ch < 2; ch++) {
-    const data = impulse.getChannelData(ch);
-    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 2.4;
-  }
-  const convolver = ctx.createConvolver();
-  convolver.buffer = impulse;
-  return convolver;
-}
+// --- Music --------------------------------------------------------------
+// The soundtrack is an original track by the project author, trimmed to the
+// film's 30 seconds. It is fetched only after Enter and played through Web
+// Audio, so one gain node handles the quiet fade in, the fade out and mute
+// (suspending the context), and closing the context ends it for good.
+const MUSIC_URL = "/assets/arrival-film-music.mp3";
+const MUSIC_LEVEL = 0.35;
+const MUSIC_FADE_IN_S = 1;
 
 function startMusic() {
   const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -674,70 +1162,54 @@ function startMusic() {
   const ctx = new Ctx();
   const master = ctx.createGain();
   master.gain.setValueAtTime(0, ctx.currentTime);
-  master.gain.linearRampToValueAtTime(MUSIC_LEVEL, ctx.currentTime + 2);
-
-  const filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.setValueAtTime(900, ctx.currentTime);
-  filter.Q.setValueAtTime(0.4, ctx.currentTime);
-  const reverb = makeReverb(ctx);
-  const wet = ctx.createGain();
-  wet.gain.setValueAtTime(0.6, ctx.currentTime);
-  filter.connect(master);
-  filter.connect(reverb);
-  reverb.connect(wet);
-  wet.connect(master);
   master.connect(ctx.destination);
-
-  const voices = [0, 2, 4, 5].map((step, i) => {
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(PENTATONIC_HZ[step], ctx.currentTime);
-    osc.detune.setValueAtTime((i - 1.5) * 4, ctx.currentTime);
-    const swell = ctx.createGain();
-    swell.gain.setValueAtTime(0.15, ctx.currentTime);
-    osc.connect(swell);
-    swell.connect(filter);
-    osc.start();
-    return { osc, swell, phase: i * 1.7 };
-  });
-
-  // Slow swells, and now and then one voice drifts to another scale note.
-  const tick = setInterval(() => {
-    const t = ctx.currentTime;
-    for (const v of voices) {
-      const level = 0.12 + 0.1 * (0.5 + 0.5 * Math.sin(t / 3.2 + v.phase));
-      v.swell.gain.setTargetAtTime(level, t, 1.5);
-    }
-    if (Math.random() < 0.25) {
-      const v = voices[Math.floor(Math.random() * voices.length)];
-      v.osc.frequency.setTargetAtTime(PENTATONIC_HZ[Math.floor(Math.random() * PENTATONIC_HZ.length)], t, 2.5);
-    }
-  }, 1_500);
-
-  filmAudio = { ctx, master, voices, tick };
+  filmAudio = { ctx, master, source: undefined };
   if (readFlag(FILM_MUTED_KEY)) ctx.suspend();
+
+  const audio = filmAudio;
+  fetch(MUSIC_URL)
+    .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error("music"))))
+    .then((data) => ctx.decodeAudioData(data))
+    .then((buffer) => {
+      // The film may have ended while the track was downloading.
+      if (filmAudio !== audio || !filming) return;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(master);
+      // Start where the film is now, so the music stays in step with the bar.
+      const offset = Math.max(0, (Date.now() - filmStartedAt) / 1000);
+      if (offset >= buffer.duration) return;
+      source.start(0, offset);
+      master.gain.setValueAtTime(0, ctx.currentTime);
+      master.gain.linearRampToValueAtTime(MUSIC_LEVEL, ctx.currentTime + MUSIC_FADE_IN_S);
+      audio.source = source;
+    })
+    // No music is never an error: the film carries on silently.
+    .catch(() => {});
 }
 
 function stopMusic() {
   if (!filmAudio) return;
-  const { ctx, master, voices, tick } = filmAudio;
+  const { ctx, master, source } = filmAudio;
   filmAudio = undefined;
-  clearInterval(tick);
   // Fade out over a second, then release the audio entirely: the lounge is
   // quiet.
   master.gain.cancelScheduledValues(ctx.currentTime);
   master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
   master.gain.linearRampToValueAtTime(0, ctx.currentTime + 1);
   setTimeout(() => {
-    for (const v of voices) v.osc.stop();
+    try {
+      source?.stop();
+    } catch {
+      // Already stopped.
+    }
     ctx.close();
   }, 1_100);
 }
 
 function updateSoundPill() {
   const muted = readFlag(FILM_MUTED_KEY);
-  filmSound.textContent = muted ? "SOUND" : "MUTE";
+  filmSound.textContent = muted ? "UNMUTE" : "MUTE";
   filmSound.setAttribute("aria-pressed", String(muted));
   filmSound.setAttribute("aria-label", muted ? "Sound is off. Turn sound on" : "Sound is on. Mute");
 }
@@ -755,17 +1227,22 @@ function showFilmLine(index) {
   filmLine.textContent = FILM_LINES[index % FILM_LINES.length];
 }
 
+function swapFilmLine(index) {
+  filmLine.classList.add("fading");
+  filmTimers.push(setTimeout(() => {
+    showFilmLine(index);
+    filmLine.classList.remove("fading");
+  }, 600));
+}
+
 function startFilmWords() {
-  let index = Math.floor(Math.random() * FILM_LINES.length);
+  let index = 0;
   showFilmLine(index);
+  // The second line takes the back half of the opening slot.
+  filmTimers.push(setTimeout(() => swapFilmLine(++index), LINE_MS / 2));
   filmTimers.push(setInterval(() => {
-    index++;
-    if (reducedMotion) return showFilmLine(index);
-    filmLine.classList.add("fading");
-    filmTimers.push(setTimeout(() => {
-      showFilmLine(index);
-      filmLine.classList.remove("fading");
-    }, 600));
+    if (index >= FILM_LINES.length - 1) return;
+    swapFilmLine(++index);
   }, LINE_MS));
 }
 
@@ -778,8 +1255,10 @@ function updateFilmBar() {
 }
 
 // --- The film's timeline ---------------------------------------------------
+// The film is a first-visit gift, never a toll: reduced motion, Save-Data
+// and 2g connections go straight into the lounge, as do returning browsers.
 function filmAllowed() {
-  return Boolean(filmEl) && !reducedMotion && !readFlag(FILM_SEEN_KEY);
+  return Boolean(filmEl) && arrivalVideoAllowed() && !readFlag(FILM_SEEN_KEY);
 }
 
 function playFilm() {
@@ -795,7 +1274,7 @@ function playFilm() {
   filmTimers.push(setInterval(updateFilmBar, 250));
   filmTimers.push(setTimeout(endFilm, FILM_MS));
   if (!readFlag(FILM_MUTED_KEY)) startMusic();
-  startWarp();
+  startCloud();
   filmSkip.focus();
 }
 
@@ -807,19 +1286,24 @@ function endFilm() {
     clearInterval(t);
   }
   filmTimers = [];
-  stopWarp();
   stopMusic();
+  // The picture keeps drifting while it fades out, then everything stops.
+  document.body.classList.add("film-leaving");
+  setTimeout(() => {
+    document.body.classList.remove("film-leaving");
+    stopCloud();
+  }, 700);
   document.body.classList.remove("filming");
   filmEl.setAttribute("aria-hidden", "true");
   // The lounge opens at once; the music's fade happens as it does.
   activateSky();
 }
 
-// The warp pauses while the tab is hidden, and picks up where it left off.
+// The cloud pauses while the tab is hidden; the film's clock does not.
 document.addEventListener("visibilitychange", () => {
   if (!filming) return;
-  if (document.visibilityState === "hidden") stopWarp();
-  else runWarp();
+  if (document.visibilityState === "hidden") stopCloud();
+  else filmCloud?.play()?.catch(() => {});
 });
 
 function enterLounge() {
@@ -838,32 +1322,54 @@ function activateSky({ remember = false } = {}) {
   document.body.classList.add("entered");
   document.getElementById("arrival")?.setAttribute("aria-hidden", "true");
   document.getElementById("sky-app")?.setAttribute("aria-hidden", "false");
+  routeFromHash();
+  relayout();
   // Focus goes to something the visitor can act on: their own star, or the
-  // place button if they have none. Never the heading.
-  const target = svg.querySelector('g.star[data-own="true"]') ?? placeButton;
-  target?.focus();
+  // view's one action if they have none. Never the heading.
+  const own = ownStarInView() ? starNodes.get(ownId()) : undefined;
+  const action = [document.getElementById("place-star"), document.getElementById("settle-action")].find((b) => b && !b.hidden);
+  (own ?? action)?.focus();
   announce("You've entered the lounge.");
+  // Stars glide between places only once the lounge is open: the first
+  // paint never animates.
+  nextFrame(() => nextFrame(() => stage?.classList.remove("still")));
 
   joinLounge({ checkIn: document.body.dataset.hasStar === "true" });
 }
 
 (function init() {
   localizeSinceDate();
-  const hasStar = document.body.dataset.hasStar === "true";
+  updateFrame();
+  render();
+  drawFigures();
+  placeDoorways();
+  wireStage();
+  wireBreak();
+  wireTraces();
 
-  if (hasStar) {
-    wireOwnStar();
-  } else {
-    placeButton?.addEventListener("click", () => {
-      placeStar();
-    });
-
-    svg.addEventListener("click", (e) => {
-      if (document.body.dataset.hasStar === "true") return;
-      const { x, y } = toSvgPoint(e.clientX, e.clientY);
-      placeStar(x, y);
+  // Every link to a view changes view in place; the address bar follows.
+  for (const a of document.querySelectorAll("a[data-view]")) {
+    a.addEventListener("click", (e) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      setView(a.dataset.view === "common" ? null : a.dataset.view);
     });
   }
+  document.getElementById("place-star")?.addEventListener("click", () => placeStar());
+  document.getElementById("settle-action")?.addEventListener("click", () => {
+    if (view !== "common") settleIn(view);
+  });
+  document.getElementById("leave-area")?.addEventListener("click", leaveConstellation);
+
+  let resizePending = false;
+  window.addEventListener("resize", () => {
+    if (resizePending) return;
+    resizePending = true;
+    nextFrame(() => {
+      resizePending = false;
+      relayout();
+    });
+  });
 
   arrivalButton?.addEventListener("click", enterLounge);
   filmSkip?.addEventListener("click", endFilm);
@@ -878,7 +1384,10 @@ function activateSky({ remember = false } = {}) {
       }
       return;
     }
-    if (!skyActive && e.key === "Escape") enterLounge();
+    if (e.key !== "Escape") return;
+    if (!skyActive) enterLounge();
+    else if (breakPanel && !breakPanel.hidden) openBreak(false);
+    else if (picked) setPicked(false);
   });
 
   if (hasCheckedIn()) activateSky();
