@@ -40,27 +40,24 @@ Live URL: https://comp4020-final-mukulsharma0260-alt.fly.dev/
 
 ## The permission rule
 
-B cannot move A's star. The server ignores any star id in the request and
-moves only the star B's own cookie owns.
+During the crit, A and B only use the app as anyone would: each places and
+moves their own star, and nobody opens anything else. The logs then show two
+different anonymous actors, each moving only its own star:
 
-To show it, B opens DevTools (Cmd+Option+J) in their window and runs this,
-pasting **A's** star id from the log in place of `A-STAR-ID`:
-
-```js
-fetch("/api/star/move", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ x: 0.9, y: 0.9, starId: "A-STAR-ID" }),
-}).then((r) => r.json()).then(console.log);
+```text
+audit action=star.moved actor=star:30c2706e-… target=star:30c2706e-… result=ok
+audit action=star.moved actor=star:bb85354e-… target=star:bb85354e-… result=ok
 ```
 
-- The reply's `star.id` is **B's** id, not A's.
-- On both screens, **B's** star jumps to the bottom-right. **A's** stays put.
-- The log line names B as both actor and target, and A's id is nowhere on it:
+"A move always names its own star as the target. The page never tells the
+server which star to move; the server works it out from the browser's
+cookie."
 
-  ```text
-  audit action=star.moved actor=star:bb85354e-… target=star:bb85354e-… result=ok
-  ```
+The stronger rule is proved by an automated server test rather than in the
+demo: even if B sends A's public star id with a move, the server ignores it
+and resolves ownership only from B's cookie, so B can move only B's own star.
+The test checks that A's position is unchanged and that the log line names B
+as both actor and target, with A's id nowhere on it (`spec/audit.test.ts`).
 
 A visitor with no star at all is refused, and logged without any identity:
 
@@ -71,7 +68,8 @@ audit action=star.move_denied actor=anonymous result=no_owned_star
 ## What to say about identity
 
 "Overlap tells anonymous **browsers** apart, not people. A star id is a
-random label the page already shows to everyone. The logs never contain the
+random label already shared with every connected browser as public star
+state. The logs never contain the
 cookie, its hash, an IP address, or what the browser sent, so I can follow
 who did what without ever knowing who anyone is."
 
