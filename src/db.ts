@@ -227,3 +227,86 @@ export function idsSeenSince(db: DatabaseSync, afterSeq: number, excludeId: stri
     .all(afterSeq, excludeId) as unknown as { id: string }[];
   return rows.map((r) => r.id);
 }
+
+// A callsign belongs to the anonymous identity itself (its token hash), not
+// to a star: see migrations/005_create_callsigns.sql. A visitor may have one
+// before ever placing a star.
+export interface Callsign {
+  tokenHash: string;
+  callsign: string;
+  callsignNormalized: string;
+  createdAt: string;
+  updatedAt: string;
+  changeAvailableAt: string;
+}
+
+interface CallsignRow {
+  token_hash: string;
+  callsign: string;
+  callsign_normalized: string;
+  created_at: string;
+  updated_at: string;
+  change_available_at: string;
+}
+
+function fromCallsignRow(row: CallsignRow): Callsign {
+  return {
+    tokenHash: row.token_hash,
+    callsign: row.callsign,
+    callsignNormalized: row.callsign_normalized,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    changeAvailableAt: row.change_available_at,
+  };
+}
+
+export function getCallsignByHash(db: DatabaseSync, tokenHash: string): Callsign | undefined {
+  const row = db.prepare("SELECT * FROM callsigns WHERE token_hash = ?").get(tokenHash) as unknown as
+    | CallsignRow
+    | undefined;
+  return row ? fromCallsignRow(row) : undefined;
+}
+
+export function getCallsignByNormalized(db: DatabaseSync, normalized: string): Callsign | undefined {
+  const row = db.prepare("SELECT * FROM callsigns WHERE callsign_normalized = ?").get(normalized) as unknown as
+    | CallsignRow
+    | undefined;
+  return row ? fromCallsignRow(row) : undefined;
+}
+
+// Thrown when callsign_normalized collides with a *different* identity's
+// already-claimed name. The server pre-checks with getCallsignByNormalized
+// for a friendly message, but this is the real authority: if two requests
+// race to claim the same name at once, SQLite's UNIQUE index decides, and
+// the loser gets this error rather than silently overwriting the winner.
+export class CallsignTakenError extends Error {}
+
+// Sets the caller's callsign: creates it on a first choice, or renames it on
+// a later one, in one statement so a crash can never leave created_at set
+// without the rest. ON CONFLICT targets token_hash only, so a rename (same
+// identity, new name) updates in place; a collision with a different
+// identity's claimed name instead hits the separate UNIQUE index on
+// callsign_normalized and throws, since that conflict has no handler here.
+export function setCallsign(
+  db: DatabaseSync,
+  tokenHash: string,
+  callsign: string,
+  callsignNormalized: string,
+  now: string,
+  changeAvailableAt: string,
+): Callsign {
+  try {
+    db.prepare(
+      `INSERT INTO callsigns (token_hash, callsign, callsign_normalized, created_at, updated_at, change_available_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(token_hash) DO UPDATE SET
+         callsign = excluded.callsign,
+         callsign_normalized = excluded.callsign_normalized,
+         updated_at = excluded.updated_at,
+         change_available_at = excluded.change_available_at`,
+    ).run(tokenHash, callsign, callsignNormalized, now, now, changeAvailableAt);
+  } catch (err) {
+    throw new CallsignTakenError("callsign already taken", { cause: err });
+  }
+  return getCallsignByHash(db, tokenHash)!;
+}
