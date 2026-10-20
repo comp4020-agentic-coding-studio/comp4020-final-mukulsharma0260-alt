@@ -18,7 +18,8 @@ What the agent needs to carry from any of it is your call.
 - Cookie tokens and token hashes must never appear in HTML, browser JavaScript, logs, or tests.
 - Audit logs go through `src/audit.ts` and use only a public star id (or `anonymous`) as the actor, plus fixed fields: a room (one of six names), a reason or change word, and whole-number counts. They never contain cookie tokens, token hashes, cookies, IP addresses, raw request bodies, locations, message text, or anyone's timestamps. Log actions, refusals, broadcasts, snapshots, and a star joining or leaving (its first visible stream opening, its last closing); never page loads, keep-alives or stream contents. Every refusal is logged with a reason.
 - Other people's exact timestamps must never appear in the HTML, attributes, visible UI, or logs. Show only rough buckets.
-- The app accepts no free text from visitors.
+- The app accepts one kind of free text: a callsign, 3-16 characters, letters/digits/spaces/hyphens/underscores only, validated and checked for uniqueness server-side (`src/callsign.ts`, ADR 0012). No other free text is accepted yet.
+- A callsign belongs to the anonymous identity (its cookie token's hash), never to a star: a visitor may have one before placing a star, a star may exist with no callsign, and neither requires the other. A callsign, once claimed, is never released or recycled in this version.
 - Before interpreting a live result, state local HEAD, deployed SHA if known, and whether the tree is clean.
 - Do not claim a visitor is physically present. For Crit 8, "last seen" means their last successful request to `/api/here`.
 - For Crit 9, a star is glowing only while at least one authenticated browser has the lounge open in a visible tab. Never claim a person is physically here.

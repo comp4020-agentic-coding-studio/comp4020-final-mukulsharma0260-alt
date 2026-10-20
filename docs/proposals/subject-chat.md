@@ -2,6 +2,12 @@
 
 Status: deferred (option B). No chat UI, disabled card or placeholder exists.
 
+**Update**: the naming idea below (an anonymous, server-generated per-day
+label such as "Star 4F") is superseded by a user-chosen, persistent callsign
+— see ADR 0012. The message-shape ideas below (280 characters, 24-hour
+expiry, SSE-filtered delivery, the audit vocabulary) still hold and carry
+forward into the chat change this proposal anticipates.
+
 ## Recommendation
 
 Defer chat until the Common Room and constellation views are approved, and
