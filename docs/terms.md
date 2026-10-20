@@ -25,6 +25,15 @@ Everything a visitor reads uses these words, and only in these senses.
 - **you**: the ring and label on the visitor's own star.
 - **Break**: the small music drawer. "N listening now" counts glowing stars
   that pressed Play, and only appears when it is above zero.
+- **callsign**: the name a visitor chooses for their messages to appear
+  under (ADR 0012). It is an anonymous alias, never a real name, never proof
+  of a real person, and belongs to the browser identity, not to a star: a
+  visitor may have one with no star, or a star with none.
+- **conversation**: the chat drawer's own word for itself. "Common Room
+  conversation" names the one Common Room conversation; a constellation's
+  conversation is named the same way ("Engineering conversation"), never
+  called a "chat room," so the existing rule that a constellation is never
+  called a room still holds.
 
 Words never used for the place: server, channel, sky (as a name), check-in,
 profile, followers. "Sky" may describe the picture, never name the place.

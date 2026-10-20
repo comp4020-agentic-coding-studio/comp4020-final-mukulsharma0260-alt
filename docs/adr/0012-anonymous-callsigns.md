@@ -2,7 +2,7 @@
 
 A visitor may choose an anonymous callsign, independent of any star
 
-# Status: Accepted
+# Status: Accepted (amended: Common Room chat)
 
 # Context
 
@@ -138,3 +138,90 @@ of this change) exists.
   (e.g. a visitor who happens to study "support" systems) cannot use it
   verbatim; this is judged an acceptable, narrow cost against the
   impersonation risk it closes.
+
+# Amendment: Common Room chat
+
+The second kind of free text this ADR anticipated: a message body, bounded
+and validated, in the Common Room only (subject-room conversations are a
+later change, gated on proving they cannot leak into each other).
+
+- **Rule amendment, again.** CLAUDE.md's rule from the decision above is
+  widened: *"The app accepts two kinds of free text: a callsign (as above),
+  and a chat message body, 1-280 characters, in the Common Room only.
+  Subject-room conversations do not exist yet."*
+- **Schema**: `migrations/006_create_messages.sql` — `messages(id, room,
+  author_token_hash, callsign_snapshot, body, created_at, expires_at)`.
+  `author_token_hash` references `callsigns(token_hash)`, not a star: posting
+  the Common Room needs only a callsign, never a star, so a `NOT NULL`
+  foreign key to `stars` would have been wrong. `room` is CHECKed against the
+  same six values `stars.constellation` and `src/audit.ts`'s `ROOMS` already
+  use (`common` plus the five constellation ids, `arts` not
+  `arts-society` — the existing URL slug split in `public/sky.js` stays the
+  only place that distinction is made, so no shipped migration or stored
+  value is touched). `callsign_snapshot` is written once and never updated,
+  so a later rename never rewrites an already-sent message.
+- **Posting rule**: an entered visitor with a callsign may post to `common`;
+  no star is required. A non-`common` room key is a real, valid room (the
+  CHECK and `isRoomKey` both accept it) but is explicitly refused with
+  `reason=room_not_available`, rather than silently accepted and never
+  delivered anywhere — a visible, honest gap until subject-room chat ships,
+  not a quiet dead end.
+- **The server always derives the callsign from its own `callsigns` lookup**,
+  never from a `callsign` field in the request body, so a message can never
+  be posted under a name its sender does not own (tested explicitly:
+  `spec/chat.test.ts`'s spoofing check).
+- **Room-scoped delivery, not a global broadcast.** `src/chat-rooms.ts`'s
+  `ChatRoomRegistry` tracks which rooms each open SSE stream belongs to
+  (`common` always, plus a settled star's own constellation); a message is
+  sent only to `streamsFor(room, ...)`, never to every open stream. A room
+  with no subscribers returns no recipients — there is no code path that
+  falls back to "everyone." This is unit-tested directly
+  (`spec/chat-rooms.test.ts`) against real room keys (`common`,
+  `engineering`), including the no-fallback case, independent of there being
+  a second room reachable through the API yet. The stronger, real-product
+  proof — two settled visitors, Engineering and Science, an Engineering
+  message never reaching the Science stream's payload — is the gate for the
+  change that makes subject rooms postable, not this one.
+- **Membership is recomputed, not just set once**, at exactly the two points
+  it can change: a star's constellation changing, and an identity's first
+  star being created after its `/events` stream was already open (a visitor
+  may choose a callsign, start listening, and only then place a star). Both
+  are covered by dedicated tests.
+- **No `authorStarId` in `message.created`.** The event carries only `{ id,
+  callsign, body, createdAt }` — enough to render a chat bubble and mark a
+  visitor's own messages (by comparing callsign, not star id), with no
+  reason to link a public star id to chat content at all.
+- **Rate limiting and duplicate suppression, in memory only** (same
+  precedent as Break's `listeningByStarId`): 3 sends per 10 seconds per
+  identity (`src/message-limits.ts`'s `RateLimiter`), and a required,
+  format-validated idempotency key (`^[A-Za-z0-9_-]{1,64}$`) suppresses a
+  retried send for 60 seconds (`IdempotencyCache`). Both are swept
+  periodically so an identity's entry does not sit in memory forever once
+  idle, the same bounding discipline already used for the rate limiter
+  itself.
+- **Expiry is declared but not yet enforced by a sweep.** `expires_at` is
+  written at post time (`created_at + 24h`); the read path already filters
+  on it (`listRoomMessages`), so an expired message cannot be read back
+  starting the instant this ships — but the periodic deletion of expired
+  rows, and a live `message.expired` event for connected visitors, are
+  explicitly a later change, not silently assumed here.
+- **XSS**: a message body is stored and delivered verbatim; safety comes
+  entirely from the client rendering it with `.textContent`
+  (`renderChatMessage` in `public/sky.js`), never `innerHTML` or a
+  template string, matching the discipline already used for every other
+  visitor-facing value in this codebase. Tested directly, including a
+  red/green demonstration that a reversion to `innerHTML` is caught.
+- **No message deletion in this change.** Deferred to keep this change's
+  write-surface smaller, consistent with the "smallest honest schema"
+  approach the callsign decision already took.
+
+## Consequences (chat)
+
+- A message posted to a non-`common` room key is refused outright today,
+  not silently accepted; the UI never offers one, since no subject-room
+  conversation exists to send it to yet.
+- A restart clears the rate limiter and idempotency cache, the same
+  accepted cost as every other in-memory-only state in this app.
+- `docs/terms.md` gains **callsign** and **conversation**; "Common Room" and
+  "constellation" keep their existing meanings and existing rule (a
+  constellation is never called a room) unchanged.

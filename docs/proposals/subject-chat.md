@@ -1,12 +1,17 @@
 # Recommendation: anonymous subject chat (not built)
 
-Status: deferred (option B). No chat UI, disabled card or placeholder exists.
+Status: Common Room chat is now built (ADR 0012's amendment). Subject
+(per-constellation) chat — this proposal's original scope — is still not
+built; it is the next change, gated on proving cross-room content isolation
+before any subject room becomes postable.
 
 **Update**: the naming idea below (an anonymous, server-generated per-day
 label such as "Star 4F") is superseded by a user-chosen, persistent callsign
 — see ADR 0012. The message-shape ideas below (280 characters, 24-hour
-expiry, SSE-filtered delivery, the audit vocabulary) still hold and carry
-forward into the chat change this proposal anticipates.
+expiry, SSE-filtered delivery, the audit vocabulary) were carried forward
+into Common Room chat as built, and still apply to subject chat once it
+ships: filtered delivery is already implemented generically
+(`src/chat-rooms.ts`), reusable for a second room without rework.
 
 ## Recommendation
 
