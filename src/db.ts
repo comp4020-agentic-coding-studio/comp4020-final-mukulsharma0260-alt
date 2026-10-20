@@ -75,6 +75,13 @@ export function openDb(path: string): DatabaseSync {
   return db;
 }
 
+// A star by its public id, for server-side use only (the logs need a star's
+// current room after its last stream closes, when no cookie is at hand).
+export function getById(db: DatabaseSync, id: string): Star | undefined {
+  const row = db.prepare("SELECT * FROM stars WHERE id = ?").get(id) as unknown as StarRow | undefined;
+  return row ? fromRow(row) : undefined;
+}
+
 export function getByHash(db: DatabaseSync, tokenHash: string): Star | undefined {
   const row = db.prepare("SELECT * FROM stars WHERE token_hash = ?").get(tokenHash) as unknown as
     | StarRow
