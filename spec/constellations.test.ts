@@ -641,7 +641,9 @@ it("listening is never written to SQLite", async () => {
     const db = new DatabaseSync(join(dir, "stars.db"), { readOnly: true });
     try {
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>;
-      expect(tables.map((t) => t.name).sort()).toEqual(["callsigns", "schema_migrations", "star_seq", "stars"].sort());
+      expect(tables.map((t) => t.name).sort()).toEqual(
+        ["callsigns", "messages", "schema_migrations", "star_seq", "stars"].sort(),
+      );
       const cols = (db.prepare("PRAGMA table_info(stars)").all() as Array<{ name: string }>).map((c) => c.name);
       for (const col of cols) expect(col).not.toMatch(/listen|mode|^lat|^lon|latitude|longitude|location/i);
     } finally {

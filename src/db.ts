@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { migrate } from "./migrate.ts";
+import { ROOMS, type Room } from "./audit.ts";
 
 export interface Star {
   id: string;
@@ -309,4 +310,97 @@ export function setCallsign(
     throw new CallsignTakenError("callsign already taken", { cause: err });
   }
   return getCallsignByHash(db, tokenHash)!;
+}
+
+// A chat message (migrations/006_create_messages.sql). author_token_hash is
+// server-only: it is never read back by anything in this module's public
+// shape (see PublicMessage) or sent in any API response or SSE event.
+export interface Message {
+  id: string;
+  room: Room;
+  authorTokenHash: string;
+  callsignSnapshot: string;
+  body: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+// What a message is allowed to tell another browser: never the author's
+// token hash, only the identity-free facts a chat bubble needs to render.
+export interface PublicMessage {
+  id: string;
+  callsign: string;
+  body: string;
+  createdAt: string;
+}
+
+export function publicMessage(m: Message): PublicMessage {
+  return { id: m.id, callsign: m.callsignSnapshot, body: m.body, createdAt: m.createdAt };
+}
+
+interface MessageRow {
+  id: string;
+  room: string;
+  author_token_hash: string;
+  callsign_snapshot: string;
+  body: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export function isRoomKey(value: unknown): value is Room {
+  return typeof value === "string" && (ROOMS as readonly string[]).includes(value);
+}
+
+function fromMessageRow(row: MessageRow): Message {
+  return {
+    id: row.id,
+    // Written and read back through the same CHECK-constrained column, so
+    // an unrecognised value here would mean the CHECK itself had changed
+    // without this cast being updated — not a value a normal write path
+    // could ever produce.
+    room: row.room as Room,
+    authorTokenHash: row.author_token_hash,
+    callsignSnapshot: row.callsign_snapshot,
+    body: row.body,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+}
+
+// Inserts a message whose author is the given identity. The caller is
+// responsible for resolving tokenHash to its own real, current callsign
+// (getCallsignByHash) before calling this: callsignSnapshot is taken as
+// given, never re-derived here, so a caller that passed a client-supplied
+// value instead of the server's own lookup would be the one at fault, not
+// this function — see src/server.ts's handleCreateMessage for the actual
+// lookup this function must never be allowed to skip.
+export function createMessage(
+  db: DatabaseSync,
+  args: { id: string; room: Room; tokenHash: string; callsignSnapshot: string; body: string; now: string; expiresAt: string },
+): Message {
+  db.prepare(
+    `INSERT INTO messages (id, room, author_token_hash, callsign_snapshot, body, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(args.id, args.room, args.tokenHash, args.callsignSnapshot, args.body, args.now, args.expiresAt);
+  return {
+    id: args.id,
+    room: args.room,
+    authorTokenHash: args.tokenHash,
+    callsignSnapshot: args.callsignSnapshot,
+    body: args.body,
+    createdAt: args.now,
+    expiresAt: args.expiresAt,
+  };
+}
+
+// Unexpired messages in a room, oldest first. The expiry filter is here,
+// not only in a separate sweep job, so an expired message can never be
+// read back even if no sweep has run yet (Phase 4 adds the sweep; this
+// filter is what actually enforces expiry on every read path).
+export function listRoomMessages(db: DatabaseSync, room: Room, nowIso: string): Message[] {
+  const rows = db
+    .prepare("SELECT * FROM messages WHERE room = ? AND expires_at > ? ORDER BY created_at ASC")
+    .all(room, nowIso) as unknown as MessageRow[];
+  return rows.map(fromMessageRow);
 }

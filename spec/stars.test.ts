@@ -431,7 +431,7 @@ it("a star survives closing and reopening the database file", () => {
     // One row per migrations/*.sql file, each applied exactly once (not
     // reapplied on reopen).
     const applied = db2.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number };
-    expect(applied.n).toBe(5);
+    expect(applied.n).toBe(6);
     db2.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
