@@ -164,6 +164,9 @@ export function renderHomePage(
     unsettled: 0,
   },
   liveStarIds: string[] = [],
+  // Independent of viewerStarId: a callsign belongs to the browser identity,
+  // not to a star, so it is passed separately rather than read off a star.
+  ownCallsign: string | undefined = undefined,
 ): string {
   const ownStar = viewerStarId ? stars.find((s) => s.id === viewerStarId) : undefined;
   const ownArea = ownStar?.constellation ?? null;
@@ -847,6 +850,30 @@ export function renderHomePage(
   #status.visible { opacity: 1; }
   #status.error { color: #f1c5c5; }
 
+  /* A quiet, compact step: chosen once, changed rarely, never a modal or a
+     full-screen gate over the star field. */
+  .callsign-panel { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-line); }
+  #callsign-current { margin: 0; color: var(--color-ink-muted); font-size: var(--text-sm); }
+  #callsign-current strong { color: var(--color-ink); font-weight: 600; }
+  .link-button { padding: 0; border: 0; background: none; color: var(--color-gold); font: inherit; text-decoration: underline; cursor: pointer; }
+  .link-button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+  .callsign-hint { margin: 0.2rem 0 0; color: var(--color-ink-muted); font-size: var(--text-xs); line-height: 1.4; }
+  #callsign-form label { display: block; margin-top: var(--space-2); color: var(--color-ink); font: 600 var(--text-sm)/1.2 var(--font-ui); }
+  .callsign-row { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-2); }
+  #callsign-input {
+    flex: 1 1 10rem;
+    min-height: var(--target);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-1);
+    background: rgba(244, 238, 226, 0.03);
+    color: var(--color-ink);
+    font: inherit;
+  }
+  #callsign-input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+  #callsign-error { margin: var(--space-2) 0 0; color: #f1c5c5; font-size: var(--text-xs); min-height: 1em; }
+  #callsign-error:empty { display: none; }
+
   /* One primary button style, shared with the arrival's, refined for the
      lounge: sentence case in the UI face, never the browser default. */
   #sky-app .lounge-button {
@@ -988,7 +1015,7 @@ export function renderHomePage(
   }
 </style>
 </head>
-<body data-view="common" data-has-star="${ownStar ? "true" : "false"}" data-own-star="${ownStar ? escapeAttr(ownStar.id) : ""}" data-constellation="${ownArea ?? ""}" data-regions="${escapeAttr(JSON.stringify(REGIONS))}" data-constellations="${escapeAttr(JSON.stringify(info))}" data-insets="${escapeAttr(JSON.stringify(INSETS))}">
+<body data-view="common" data-has-star="${ownStar ? "true" : "false"}" data-own-star="${ownStar ? escapeAttr(ownStar.id) : ""}" data-constellation="${ownArea ?? ""}" data-has-callsign="${ownCallsign ? "true" : "false"}" data-callsign="${ownCallsign ? escapeAttr(ownCallsign) : ""}" data-regions="${escapeAttr(JSON.stringify(REGIONS))}" data-constellations="${escapeAttr(JSON.stringify(info))}" data-insets="${escapeAttr(JSON.stringify(INSETS))}">
 <section id="arrival" aria-labelledby="arrival-title">
   <picture class="arrival-still" aria-hidden="true">
     <source type="image/webp" srcset="/assets/arrival-galaxy-960.webp 960w, /assets/arrival-galaxy-1920.webp 1920w" sizes="100vw">
@@ -1084,6 +1111,19 @@ export function renderHomePage(
         <button type="button" id="settle-action" class="lounge-button" hidden></button>
         <button type="button" id="leave-area" class="quiet-button" hidden></button>
       </div>
+    </div>
+    <div id="callsign-panel" class="callsign-panel">
+      <p id="callsign-current"${ownCallsign ? "" : " hidden"}>You are <strong id="callsign-current-name">${ownCallsign ? escapeHtml(ownCallsign) : ""}</strong>. <button type="button" id="callsign-change" class="link-button">Change</button></p>
+      <form id="callsign-form"${ownCallsign ? " hidden" : ""}>
+        <label for="callsign-input">Choose your callsign</label>
+        <p class="callsign-hint">This is how your messages will appear. No account or profile is created. Please do not use your real name.</p>
+        <div class="callsign-row">
+          <input type="text" id="callsign-input" name="callsign" minlength="3" maxlength="16" autocomplete="off" placeholder="nightowl" value="${ownCallsign ? escapeAttr(ownCallsign) : ""}">
+          <button type="submit" class="lounge-button">Enter the Lounge</button>
+          <button type="button" id="callsign-cancel" class="quiet-button"${ownCallsign ? "" : " hidden"}>Cancel</button>
+        </div>
+        <p id="callsign-error" role="alert" aria-live="assertive"></p>
+      </form>
     </div>
     <ul class="legend" aria-label="What the light means">
       <li data-legend="live"><span class="swatch swatch-live" aria-hidden="true"></span>Studying now</li>

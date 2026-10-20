@@ -863,6 +863,70 @@ async function placeStar(x, y, constellation) {
   return true;
 }
 
+// ---- Callsign ----------------------------------------------------------
+// An anonymous alias, chosen once and rarely changed, independent of
+// whether this browser has placed a star yet. Never a full-screen gate over
+// the star field: a compact step in the dock.
+
+const callsignForm = document.getElementById("callsign-form");
+const callsignInput = document.getElementById("callsign-input");
+const callsignError = document.getElementById("callsign-error");
+const callsignCurrent = document.getElementById("callsign-current");
+const callsignCurrentName = document.getElementById("callsign-current-name");
+const callsignCancel = document.getElementById("callsign-cancel");
+
+function showCallsignForm(show) {
+  if (!callsignForm) return;
+  callsignForm.hidden = !show;
+  if (show) {
+    callsignInput.value = document.body.dataset.callsign ?? "";
+    callsignError.textContent = "";
+    callsignInput.focus();
+  }
+}
+
+async function submitCallsign(value) {
+  callsignError.textContent = "";
+  let res;
+  try {
+    res = await fetch("/api/callsign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callsign: value }),
+    });
+  } catch {
+    callsignError.textContent = "Could not reach the lounge. Check your connection and try again.";
+    return;
+  }
+  if (!res.ok) {
+    const { error } = await res.json().catch(() => ({ error: "Could not set that callsign. Please try again." }));
+    callsignError.textContent = error ?? "Could not set that callsign. Please try again.";
+    return;
+  }
+  const { callsign } = await res.json();
+  document.body.dataset.hasCallsign = "true";
+  document.body.dataset.callsign = callsign.callsign;
+  callsignCurrentName.textContent = callsign.callsign;
+  callsignCurrent.hidden = false;
+  showCallsignForm(false);
+  announce(`You are ${callsign.callsign}.`);
+}
+
+function wireCallsign() {
+  if (!callsignForm) return;
+  callsignForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const value = callsignInput.value;
+    if (value.trim().length < 3) {
+      callsignError.textContent = "Choose at least 3 characters.";
+      return;
+    }
+    submitCallsign(value);
+  });
+  document.getElementById("callsign-change")?.addEventListener("click", () => showCallsignForm(true));
+  callsignCancel?.addEventListener("click", () => showCallsignForm(false));
+}
+
 // A check-in counts this browser's own star as seen, so it is only for a
 // visitor who has entered the lounge and has a star. It guards itself rather
 // than trusting every caller to.
@@ -1346,6 +1410,7 @@ function activateSky({ remember = false } = {}) {
   wireStage();
   wireBreak();
   wireTraces();
+  wireCallsign();
 
   // Every link to a view changes view in place; the address bar follows.
   for (const a of document.querySelectorAll("a[data-view]")) {

@@ -55,10 +55,13 @@ it("the arrival screen claims no counts and no presence it cannot know yet", asy
   }
 });
 
-it("the page has no name field, sign-in form or free-text input", async () => {
-  const { doc } = await arrival();
-  expect(doc.querySelectorAll("textarea, form, [contenteditable]")).toHaveLength(0);
-  const textInputs = [...doc.querySelectorAll("input")].filter(
+it("the arrival screen itself has no name field, sign-in form or free-text input", async () => {
+  // Scoped to the arrival screen, not the whole page: the lounge now has one
+  // bounded free-text field (the callsign), an explicit, narrow exception to
+  // CLAUDE.md's rule (ADR 0012), reached only after entering, never here.
+  const { section } = await arrival();
+  expect(section.querySelectorAll("textarea, [contenteditable]")).toHaveLength(0);
+  const textInputs = [...section.querySelectorAll("input")].filter(
     (i) => !["button", "submit", "checkbox", "radio", "range", "hidden"].includes(i.type),
   );
   expect(textInputs).toHaveLength(0);

@@ -11,10 +11,14 @@ import {
 } from "./cookies.ts";
 import {
   CONSTELLATIONS,
+  CallsignTakenError,
   createStar,
   getByHash,
   getById,
+  getCallsignByHash,
+  getCallsignByNormalized,
   isConstellation,
+  setCallsign,
   setConstellation,
   traceCounts,
   idsSeenSince,
@@ -23,7 +27,8 @@ import {
   openDb,
   touchSeen,
 } from "./db.ts";
-import type { Constellation, Star } from "./db.ts";
+import type { Callsign, Constellation, Star } from "./db.ts";
+import { isReservedCallsign, isValidCallsignFormat, normalizeCallsign, trimCallsign, CALLSIGN_RULES } from "./callsign.ts";
 import { renderHomePage } from "./render.ts";
 import { clampToRegion, settlePosition, spotInRegion } from "./regions.ts";
 import { renderMarkdown } from "./markdown.ts";
@@ -233,6 +238,27 @@ function identityFromRequest(req: IncomingMessage): { token: string; star: Star 
   return { token, star };
 }
 
+// The cookie token alone, with no requirement that a star exists yet: a
+// callsign belongs to the identity, not to a star (see
+// migrations/005_create_callsigns.sql), so this is the one place besides
+// identityFromRequest that reads the cookie, used wherever a callsign must
+// be found or set independently of star ownership.
+function tokenFromRequest(req: IncomingMessage): string | undefined {
+  return parseCookies(req.headers.cookie)[COOKIE_NAME];
+}
+
+// Returns the request's existing identity cookie token, or mints and sets a
+// fresh one. A callsign may be the very first thing a visitor does, before
+// any star exists, so whichever of /api/callsign or /api/star happens first
+// must not orphan the other by minting a second token for the same browser.
+function issuedToken(req: IncomingMessage, res: ServerResponse): string {
+  const existing = tokenFromRequest(req);
+  if (existing) return existing;
+  const token = generateToken();
+  res.setHeader("Set-Cookie", serializeIdentityCookie(token, IS_PROD));
+  return token;
+}
+
 function renderReadmePage(): string {
   const md = readFileSync(new URL("../README.md", import.meta.url), "utf8");
   const body = renderMarkdown(md);
@@ -280,7 +306,10 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
     constellation = b.constellation;
   }
 
-  const token = generateToken();
+  // Reuses a token this browser already has (from choosing a callsign before
+  // ever placing a star) rather than minting a second one, so a callsign and
+  // a star chosen in either order end up on the same identity.
+  const token = issuedToken(req, res);
   const now = new Date().toISOString();
   const id = randomUUID();
   // A tap inside the region keeps its place; with no tap, the star gets its
@@ -288,7 +317,6 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
   if (constellation) ({ x, y } = placed ? settlePosition(constellation, id, x, y) : spotInRegion(constellation, id));
   const star = createStar(db, { id, tokenHash: hashToken(token), x, y, now, constellation });
 
-  res.setHeader("Set-Cookie", serializeIdentityCookie(token, IS_PROD));
   sendJson(res, 201, { star: ownStar(star) });
   audit({ action: "star.created", actor: starActor(star.id), room: roomOf(star), result: "accepted" });
   broadcastStar("created", star);
@@ -377,6 +405,90 @@ async function handleChooseConstellation(req: IncomingMessage, res: ServerRespon
   });
   broadcastStar("constellation", star);
   broadcastLiveStars();
+}
+
+function publicCallsign(c: Callsign) {
+  return { callsign: c.callsign, changeAvailableAt: c.changeAvailableAt };
+}
+
+// Sets the caller's callsign: a first choice if none exists yet, or a
+// rename otherwise. This never requires a star — a callsign belongs to the
+// anonymous identity itself (migrations/005_create_callsigns.sql) — and
+// never trusts anything but the format/uniqueness/cooldown rules computed
+// here against the request's own cookie identity.
+async function handleSetCallsign(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = await readJsonBody(req);
+  if (body === undefined) {
+    deny("callsign.denied", undefined, "invalid_json");
+    sendJson(res, 400, { error: "invalid JSON" });
+    return;
+  }
+  const b = body as Record<string, unknown>;
+
+  if (!isValidCallsignFormat(b.callsign)) {
+    deny("callsign.denied", undefined, "invalid_format");
+    sendJson(res, 400, { error: `invalid callsign. ${CALLSIGN_RULES}` });
+    return;
+  }
+  const display = trimCallsign(b.callsign);
+  const normalized = normalizeCallsign(display);
+
+  if (isReservedCallsign(normalized)) {
+    deny("callsign.denied", undefined, "reserved");
+    sendJson(res, 400, { error: "that callsign is reserved. Try another." });
+    return;
+  }
+
+  const token = issuedToken(req, res);
+  const tokenHash = hashToken(token);
+  const existing = getCallsignByHash(db, tokenHash);
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  let saved: Callsign;
+  let status: number;
+  if (existing && existing.callsignNormalized === normalized) {
+    // Setting the same name again is a no-op, not a rename: it costs
+    // nothing against the cooldown, and nothing is rewritten.
+    saved = existing;
+    status = 200;
+  } else {
+    if (existing && new Date(existing.changeAvailableAt) > now) {
+      deny("callsign.denied", undefined, "cooldown");
+      sendJson(res, 429, { error: "you can change your callsign again later.", changeAvailableAt: existing.changeAvailableAt });
+      return;
+    }
+    const collision = getCallsignByNormalized(db, normalized);
+    if (collision && collision.tokenHash !== tokenHash) {
+      deny("callsign.denied", undefined, "taken");
+      sendJson(res, 409, { error: "that callsign is already taken. Try another." });
+      return;
+    }
+    const changeAvailableAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    try {
+      saved = setCallsign(db, tokenHash, display, normalized, nowIso, changeAvailableAt);
+    } catch (err) {
+      if (err instanceof CallsignTakenError) {
+        deny("callsign.denied", undefined, "taken");
+        sendJson(res, 409, { error: "that callsign is already taken. Try another." });
+        return;
+      }
+      throw err;
+    }
+    status = existing ? 200 : 201;
+  }
+
+  sendJson(res, status, { callsign: publicCallsign(saved) });
+  // A bare identity hash is never a safe audit actor (ADR 0009); only a
+  // star id is. An identity with no star yet logs as anonymous, exactly
+  // like any other identity-less action today — a direct, intended
+  // consequence of callsigns living independently of stars, not a gap.
+  const star = getByHash(db, tokenHash);
+  audit({
+    action: existing ? "callsign.changed" : "callsign.created",
+    actor: star ? starActor(star.id) : ANONYMOUS,
+    result: "accepted",
+  });
 }
 
 // A glowing star says which Break mode it pressed Play on, or { mode: null }
@@ -513,7 +625,15 @@ const server = createServer(async (req, res) => {
     if (req.method === "GET" && path === "/") {
       const identity = identityFromRequest(req);
       const stars = listAll(db);
-      sendHtml(res, 200, renderHomePage(stars, identity?.star.id, new Date(), traceCounts(db), liveStarIds()));
+      // Independent of identity.star: a callsign may exist with no star, or
+      // a star with no callsign (migrations/005_create_callsigns.sql).
+      const token = tokenFromRequest(req);
+      const ownCallsign = token ? getCallsignByHash(db, hashToken(token)) : undefined;
+      sendHtml(
+        res,
+        200,
+        renderHomePage(stars, identity?.star.id, new Date(), traceCounts(db), liveStarIds(), ownCallsign?.callsign),
+      );
     } else if (req.method === "GET" && path === "/readme/") {
       sendHtml(res, 200, renderReadmePage());
     } else if (req.method === "GET" && path === "/sky.js") {
@@ -557,6 +677,8 @@ const server = createServer(async (req, res) => {
       await handleMoveStar(req, res);
     } else if (req.method === "POST" && path === "/api/star/constellation") {
       await handleChooseConstellation(req, res);
+    } else if (req.method === "POST" && path === "/api/callsign") {
+      await handleSetCallsign(req, res);
     } else if (req.method === "POST" && path === "/api/here") {
       handleHere(req, res);
     } else if (req.method === "POST" && path === "/api/listening") {
@@ -568,7 +690,7 @@ const server = createServer(async (req, res) => {
     // Enough to debug, nothing more: the method, which known route failed,
     // and the error's class. Never the message, stack, URL, headers or body,
     // any of which could carry something private.
-    const route = ["/", "/readme/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/star/constellation", "/api/here", "/api/listening"]
+    const route = ["/", "/readme/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/star/constellation", "/api/callsign", "/api/here", "/api/listening"]
       .find((r) => req.url?.split("?")[0] === r) ?? "other";
     const kind = err instanceof Error ? err.constructor.name : "unknown";
     console.error(`error method=${req.method ?? "?"} route=${route} kind=${kind}`);
