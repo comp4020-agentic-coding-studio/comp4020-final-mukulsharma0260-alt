@@ -27,10 +27,12 @@ Live URL: https://comp4020-final-mukulsharma0260-alt.fly.dev/
 5. Watch the terminal. Each action is one line, for example:
 
    ```text
-   audit action=star.created actor=star:30c2706e-… result=created
-   audit action=star.created actor=star:bb85354e-… result=created
-   audit action=star.moved actor=star:30c2706e-… target=star:30c2706e-… result=ok
-   audit action=star.moved actor=star:bb85354e-… target=star:bb85354e-… result=ok
+   audit action=state.snapshot actor=anonymous room=common stars=12 result=sent
+   audit action=star.created actor=star:30c2706e-… room=common result=accepted
+   audit action=state.broadcast actor=star:30c2706e-… room=common change=star.created scope=all recipients=2 result=sent
+   audit action=presence.joined actor=star:30c2706e-… room=common clients_in_room=1 result=ok
+   audit action=star.moved actor=star:30c2706e-… target=star:30c2706e-… room=common result=accepted
+   audit action=state.broadcast actor=star:30c2706e-… room=common change=star.moved scope=all recipients=2 result=sent
    ```
 
 6. **Narrate it.** "`star:30c2…` is A: it was created first and every later
@@ -45,8 +47,8 @@ moves their own star, and nobody opens anything else. The logs then show two
 different anonymous actors, each moving only its own star:
 
 ```text
-audit action=star.moved actor=star:30c2706e-… target=star:30c2706e-… result=ok
-audit action=star.moved actor=star:bb85354e-… target=star:bb85354e-… result=ok
+audit action=star.moved actor=star:30c2706e-… target=star:30c2706e-… room=common result=accepted
+audit action=star.moved actor=star:bb85354e-… target=star:bb85354e-… room=common result=accepted
 ```
 
 "A move always names its own star as the target. The page never tells the
@@ -62,7 +64,7 @@ as both actor and target, with A's id nowhere on it (`spec/audit.test.ts`).
 A visitor with no star at all is refused, and logged without any identity:
 
 ```text
-audit action=star.move_denied actor=anonymous result=no_owned_star
+audit action=star.move_denied actor=anonymous reason=no_owned_star result=rejected
 ```
 
 ## What to say about identity

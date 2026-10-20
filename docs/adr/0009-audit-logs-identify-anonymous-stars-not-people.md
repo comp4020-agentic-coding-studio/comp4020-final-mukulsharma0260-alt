@@ -2,7 +2,7 @@
 
 Audit logs identify anonymous stars, not people
 
-# Status: Accepted
+# Status: Accepted (amended 19 October 2026: presence, snapshot, broadcast and every refusal are logged)
 
 # Context
 
@@ -57,7 +57,36 @@ request body or timestamp cannot be printed even by mistake.
   The star id is already public, so this adds no new identifier, but it does
   connect an action to a visible star. That is the intended privacy
   trade-off.
-- Refusals that fail validation (bad coordinates, invalid JSON) are not
-  logged; they change nothing and would mostly add noise.
+- Refusals that fail validation (bad coordinates, invalid JSON) were not
+  logged at first; the amendment below now logs every refusal.
 - Fly keeps logs for a limited time; this is a debugging trail, not a
   permanent record.
+
+# Amendment (19 October 2026): enough to narrate a multi-user test
+
+The tutor's multi-user tests are narrated from `flyctl logs` alone, so the
+log must show a user connecting and leaving, an action received, its
+broadcast, a refusal, and a snapshot sent. The original decision logged only
+actions and left live streams and failed validation out. It is widened, with
+the same safe helper:
+
+- `state.snapshot` when any stream opens (actor, room, star count);
+  `presence.joined` when a star's first visible stream opens, and
+  `presence.left reason=stream_closed` when its last one closes, each with
+  `clients_in_room` (glowing stars in that room). The server cannot tell a
+  hidden tab from a closed one or a dropped network, so the reason says only
+  what it saw. Leaving is presence: the star stays in SQLite.
+- `state.broadcast` after every broadcast, with `change`, `scope=all` and
+  `recipients`. Every stream receives every star event by design, because
+  the Common Room shows every star; the log says so rather than implying a
+  per-room channel.
+- Every refusal is logged as `result=rejected reason=<word>`: no star,
+  invalid position, invalid JSON, invalid constellation or mode, a
+  cross-origin request, or listening without a glowing tab. The body is
+  never logged, and a forged star id is still never named, because the
+  server never trusts or reads it.
+- Accepted actions now say `result=accepted` and carry the star's `room`.
+
+Still never logged: page loads, keep-alives, stream contents, cookies,
+tokens, hashes, IPs, locations, bodies and timestamps (the platform stamps
+each line). Checks: `spec/logging.test.ts`.
