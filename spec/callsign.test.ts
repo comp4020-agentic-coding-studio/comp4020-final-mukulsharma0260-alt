@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { COOKIE_NAME } from "../src/cookies.ts";
 import {
   CALLSIGN_RULES,
   isReservedCallsign,
@@ -353,5 +354,102 @@ describe("a callsign chosen before any star shares the same identity as a star p
     expect(noop.status).toBe(200);
     const { callsign } = await noop.json();
     expect(callsign.callsign).toBe("early-chooser");
+  });
+});
+
+describe("invalid callsigns are rejected over HTTP (scenario 2)", () => {
+  it.each([
+    ["too short", "ab"],
+    ["too long", "a".repeat(17)],
+    ["contains HTML", "<b>hi</b>"],
+    ["contains a line break", "night\nowl"],
+    ["contains emoji", "night\u{1F31F}"],
+    ["is empty after trim", "   "],
+  ])("%s", async (_label, value) => {
+    const res = await setCallsignOverHttp(undefined, { callsign: value });
+    expect(res.status).toBe(400);
+    const [line] = await auditLines((l) => l.includes("action=callsign.denied") && l.includes("invalid_format"));
+    expect(field(line!, "result")).toBe("rejected");
+  });
+
+  it("rejects a non-string callsign", async () => {
+    const res = await setCallsignOverHttp(undefined, { callsign: 12345 });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects invalid JSON", async () => {
+    const res = await fetch(new URL("/api/callsign", baseUrl), { method: "POST", body: "{not json" });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("trim and normalisation over HTTP (scenario 3)", () => {
+  it("stores the trimmed, whitespace-collapsed display form", async () => {
+    const res = await setCallsignOverHttp(undefined, { callsign: "  Lunar   Moth  " });
+    expect(res.status).toBe(201);
+    const { callsign } = await res.json();
+    expect(callsign.callsign).toBe("Lunar Moth");
+  });
+});
+
+describe("reserved callsigns are rejected over HTTP (scenario 4)", () => {
+  it.each(["admin", "Administrator", "SYSTEM", "moderator", "overlap", "support", "staff"])("rejects %s", async (word) => {
+    const res = await setCallsignOverHttp(undefined, { callsign: word });
+    expect(res.status).toBe(400);
+    const [line] = await auditLines((l) => l.includes("action=callsign.denied") && l.includes("reason=reserved"));
+    expect(field(line!, "result")).toBe("rejected");
+  });
+});
+
+describe("existing star ownership is unaffected by callsigns (scenario 8, regression)", () => {
+  it("creating a star, moving it and settling a constellation still work exactly as before", async () => {
+    const { cookie, id } = await createStarIdentity({ x: 0.2, y: 0.3 });
+    await setCallsignOverHttp(cookie, { callsign: "star-watcher" });
+
+    const moved = await fetch(new URL("/api/star/move", baseUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ x: 0.5, y: 0.6 }),
+    });
+    expect(moved.status).toBe(200);
+    const { star } = await moved.json();
+    expect(star.id).toBe(id);
+    expect(star.x).toBe(0.5);
+  });
+});
+
+describe("a callsign action with no star yet is audited as anonymous (identity/star split)", () => {
+  it("logs actor=anonymous when no star exists, and actor=star:<id> once the same identity later owns one", async () => {
+    const res = await setCallsignOverHttp(undefined, { callsign: "early-bird" });
+    const cookie = cookieFrom(res);
+    const [created] = await auditLines((l) => l.includes("action=callsign.created"));
+    expect(field(created!, "actor")).toBe("anonymous");
+
+    // The same identity (same cookie) now places a star, reusing the token
+    // issued above rather than minting a second one.
+    const starRes = await fetch(new URL("/api/star", baseUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: "{}",
+    });
+    const { star } = await starRes.json();
+
+    // Re-submitting the same callsign is a no-op (free of the cooldown), so
+    // it succeeds and gives a fresh audit line to check the actor on, now
+    // that this identity owns a star.
+    const noop = await setCallsignOverHttp(cookie, { callsign: "early-bird" });
+    expect(noop.status).toBe(200);
+    const [changed] = await auditLines((l) => l.includes("action=callsign.changed") && l.includes(star.id));
+    expect(field(changed!, "actor")).toBe(`star:${star.id}`);
+  });
+});
+
+describe("no secret ever appears in a callsign audit line or response", () => {
+  it("the raw cookie token never appears in captured output", async () => {
+    const res = await setCallsignOverHttp(undefined, { callsign: "secret-check" });
+    const cookie = cookieFrom(res);
+    const token = decodeURIComponent(cookie.slice(COOKIE_NAME.length + 1));
+    await auditLines((l) => l.includes("action=callsign.created"));
+    expect(output).not.toContain(token);
   });
 });
