@@ -334,7 +334,8 @@ it("choosing a constellation is audited under the public star id only", async ()
   const marker = "body-marker-must-not-be-logged";
   await choose(a.cookie, { constellation: "engineering", note: marker });
   const [line] = await auditLines((l) => l.includes("action=star.constellation_changed"));
-  expect(line).toBe(`audit action=star.constellation_changed actor=star:${a.id} target=star:${a.id} result=engineering`);
+  expect(line).toBe(`audit action=star.constellation_changed actor=star:${a.id} target=star:${a.id} room=engineering result=accepted`);
+  expect(output).not.toContain(marker);
 });
 
 it("refusals are audited without the body: no star is anonymous, a bad area names no value", async () => {
@@ -342,9 +343,9 @@ it("refusals are audited without the body: no star is anonymous, a bad area name
   await choose(undefined, { constellation: "science" });
   await choose(a.cookie, { constellation: "astrology-marker" });
   const [noStar] = await auditLines((l) => l.includes("action=star.constellation_denied") && l.includes("anonymous"));
-  expect(noStar).toBe("audit action=star.constellation_denied actor=anonymous result=no_owned_star");
+  expect(noStar).toBe("audit action=star.constellation_denied actor=anonymous reason=no_owned_star result=rejected");
   const [bad] = await auditLines((l) => l.includes("action=star.constellation_denied") && l.includes(a.id));
-  expect(bad).toBe(`audit action=star.constellation_denied actor=star:${a.id} result=invalid_constellation`);
+  expect(bad).toBe(`audit action=star.constellation_denied actor=star:${a.id} reason=invalid_constellation result=rejected`);
   expect(output).not.toContain("astrology-marker");
 });
 

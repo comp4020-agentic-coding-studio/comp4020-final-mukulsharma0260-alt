@@ -13,6 +13,7 @@ import {
   CONSTELLATIONS,
   createStar,
   getByHash,
+  getById,
   isConstellation,
   setConstellation,
   traceCounts,
@@ -27,7 +28,7 @@ import { renderHomePage } from "./render.ts";
 import { clampToRegion, settlePosition, spotInRegion } from "./regions.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { oldLight } from "./brightness.ts";
-import { ANONYMOUS, audit, starActor } from "./audit.ts";
+import { ANONYMOUS, audit, starActor, type Room } from "./audit.ts";
 import { BREAK_MODES, isBreakMode, type BreakMode } from "./break.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -155,6 +156,23 @@ function broadcast(event: string, body: unknown): void {
   for (const stream of eventStreams) sendEvent(stream, event, body);
 }
 
+// The room a star belongs to, for the logs: its constellation, or the
+// Common Room.
+function roomOf(star: { constellation: Constellation | null } | undefined): Room {
+  return star?.constellation ?? "common";
+}
+
+// Glowing stars in one room, counted from the open streams and each star's
+// stored constellation, at the moment of logging.
+function glowingIn(room: Room): number {
+  const ids = liveStarIds();
+  if (ids.length === 0) return 0;
+  const rows = db
+    .prepare(`SELECT constellation FROM stars WHERE id IN (${ids.map(() => "?").join(",")})`)
+    .all(...ids) as Array<{ constellation: string | null }>;
+  return rows.filter((r) => (r.constellation ?? "common") === room).length;
+}
+
 // Live counts per constellation: the glowing stars (an open, visible stream)
 // grouped by the area each has chosen. Each star's area is read from SQLite
 // at the moment of counting, so a change of area is reflected at once, and
@@ -189,12 +207,21 @@ function liveState() {
   };
 }
 
+// Every broadcast goes to every open stream, because the Common Room shows
+// every star; the log says so (scope=all) and how many streams it reached.
 function broadcastLiveStars(): void {
   broadcast("live", liveState());
+  audit({ action: "state.broadcast", actor: ANONYMOUS, change: "presence", scope: "all", recipients: eventStreams.size, result: "sent" });
 }
 
 function broadcastStar(change: "created" | "moved" | "constellation", star: Star): void {
   broadcast("star", { change, star: publicStar(star) });
+  audit({ action: "state.broadcast", actor: starActor(star.id), room: roomOf(star), change: `star.${change}`, scope: "all", recipients: eventStreams.size, result: "sent" });
+}
+
+// A refused request, logged with why and never with what it carried.
+function deny(action: string, actor: string | undefined, reason: string): void {
+  audit({ action, actor: actor ? starActor(actor) : ANONYMOUS, result: "rejected", reason });
 }
 
 function identityFromRequest(req: IncomingMessage): { token: string; star: Star } | undefined {
@@ -221,6 +248,7 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
 
   const body = await readJsonBody(req);
   if (body === undefined) {
+    deny("star.create_denied", undefined, "invalid_json");
     sendJson(res, 400, { error: "invalid JSON" });
     return;
   }
@@ -236,6 +264,7 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
     x = b.x;
     y = b.y;
   } else {
+    deny("star.create_denied", undefined, "invalid_position");
     sendJson(res, 400, { error: "x and y must be numbers between 0 and 1" });
     return;
   }
@@ -244,6 +273,7 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
   let constellation: Constellation | null = null;
   if (b.constellation !== undefined) {
     if (!isConstellation(b.constellation)) {
+      deny("star.create_denied", undefined, "invalid_constellation");
       sendJson(res, 400, { error: `constellation must be one of: ${CONSTELLATIONS.join(", ")}` });
       return;
     }
@@ -260,7 +290,7 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
 
   res.setHeader("Set-Cookie", serializeIdentityCookie(token, IS_PROD));
   sendJson(res, 201, { star: ownStar(star) });
-  audit({ action: "star.created", actor: starActor(star.id), result: constellation ?? "created" });
+  audit({ action: "star.created", actor: starActor(star.id), room: roomOf(star), result: "accepted" });
   broadcastStar("created", star);
   if (constellation) broadcastLiveStars();
 }
@@ -268,19 +298,21 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
 async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const identity = identityFromRequest(req);
   if (!identity) {
-    audit({ action: "star.move_denied", actor: ANONYMOUS, result: "no_owned_star" });
+    deny("star.move_denied", undefined, "no_owned_star");
     sendJson(res, 400, { error: "no star to move" });
     return;
   }
 
   const body = await readJsonBody(req);
   if (body === undefined) {
+    deny("star.move_denied", identity.star.id, "invalid_json");
     sendJson(res, 400, { error: "invalid JSON" });
     return;
   }
   const b = body as Record<string, unknown>;
 
   if (!isUnitInterval(b.x) || !isUnitInterval(b.y)) {
+    deny("star.move_denied", identity.star.id, "invalid_position");
     sendJson(res, 400, { error: "x and y must be numbers between 0 and 1" });
     return;
   }
@@ -294,7 +326,7 @@ async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promis
   sendJson(res, 200, { star: ownStar(star) });
   // Actor and target are both the star the cookie resolved to. Any star id
   // in the body is ignored, so it can never appear here.
-  audit({ action: "star.moved", actor: starActor(star.id), target: starActor(star.id), result: "ok" });
+  audit({ action: "star.moved", actor: starActor(star.id), target: starActor(star.id), room: roomOf(star), result: "accepted" });
   broadcastStar("moved", star);
 }
 
@@ -305,13 +337,14 @@ async function handleMoveStar(req: IncomingMessage, res: ServerResponse): Promis
 async function handleChooseConstellation(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const identity = identityFromRequest(req);
   if (!identity) {
-    audit({ action: "star.constellation_denied", actor: ANONYMOUS, result: "no_owned_star" });
+    deny("star.constellation_denied", undefined, "no_owned_star");
     sendJson(res, 400, { error: "no star to settle" });
     return;
   }
 
   const body = await readJsonBody(req);
   if (body === undefined) {
+    deny("star.constellation_denied", identity.star.id, "invalid_json");
     sendJson(res, 400, { error: "invalid JSON" });
     return;
   }
@@ -323,7 +356,7 @@ async function handleChooseConstellation(req: IncomingMessage, res: ServerRespon
   } else if (isConstellation(b.constellation)) {
     next = b.constellation;
   } else {
-    audit({ action: "star.constellation_denied", actor: starActor(identity.star.id), result: "invalid_constellation" });
+    deny("star.constellation_denied", identity.star.id, "invalid_constellation");
     sendJson(res, 400, { error: `constellation must be one of: ${CONSTELLATIONS.join(", ")}` });
     return;
   }
@@ -339,7 +372,8 @@ async function handleChooseConstellation(req: IncomingMessage, res: ServerRespon
     action: next ? "star.constellation_changed" : "star.constellation_left",
     actor: starActor(star.id),
     target: starActor(star.id),
-    result: next ?? "unsettled",
+    room: roomOf(star),
+    result: "accepted",
   });
   broadcastStar("constellation", star);
   broadcastLiveStars();
@@ -352,21 +386,25 @@ async function handleChooseConstellation(req: IncomingMessage, res: ServerRespon
 async function handleListening(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const identity = identityFromRequest(req);
   if (!identity) {
+    deny("break.listening_denied", undefined, "no_owned_star");
     sendJson(res, 400, { error: "no star" });
     return;
   }
   const body = await readJsonBody(req);
   if (body === undefined) {
+    deny("break.listening_denied", identity.star.id, "invalid_json");
     sendJson(res, 400, { error: "invalid JSON" });
     return;
   }
   const b = body as Record<string, unknown>;
   if (b.mode !== null && !isBreakMode(b.mode)) {
+    deny("break.listening_denied", identity.star.id, "invalid_mode");
     sendJson(res, 400, { error: `mode must be null or one of: ${BREAK_MODES.map((m) => m.id).join(", ")}` });
     return;
   }
   const id = identity.star.id;
   if (b.mode !== null && !(eventStreamsByStarId.get(id)?.size)) {
+    deny("break.listening_denied", id, "not_glowing");
     sendJson(res, 409, { error: "only a glowing star can listen" });
     return;
   }
@@ -375,7 +413,7 @@ async function handleListening(req: IncomingMessage, res: ServerResponse): Promi
   else listeningByStarId.set(id, b.mode);
   sendJson(res, 200, { mode: b.mode });
   if (before !== b.mode) {
-    audit({ action: b.mode ? "break.listening" : "break.stopped", actor: starActor(id), result: b.mode ?? "stopped" });
+    audit({ action: b.mode ? "break.listening" : "break.stopped", actor: starActor(id), room: roomOf(identity.star), reason: b.mode ?? "stopped", result: "accepted" });
     broadcastLiveStars();
   }
 }
@@ -425,13 +463,19 @@ function handleEvents(req: IncomingMessage, res: ServerResponse): void {
   // All of this is synchronous, so no event can fall between the two, and
   // the snapshot already includes the live state this stream contributes.
   const { starIds, ...counts } = liveState();
+  const stars = listAll(db).map(publicStar);
   sendEvent(res, "sync", {
-    stars: listAll(db).map(publicStar),
+    stars,
     liveStarIds: starIds,
     ...counts,
   });
+  const room = roomOf(identity?.star);
+  audit({ action: "state.snapshot", actor: starId ? starActor(starId) : ANONYMOUS, room, stars: stars.length, result: "sent" });
   eventStreams.add(res);
-  if (wasOffline) broadcastLiveStars();
+  if (wasOffline && starId) {
+    audit({ action: "presence.joined", actor: starActor(starId), room, clientsInRoom: glowingIn(room), result: "ok" });
+    broadcastLiveStars();
+  }
 
   const heartbeat = setInterval(() => {
     if (!res.writableEnded && !res.destroyed) res.write(": keep-alive\n\n");
@@ -450,6 +494,11 @@ function handleEvents(req: IncomingMessage, res: ServerResponse): void {
     if (streams.size > 0) return;
     eventStreamsByStarId.delete(starId);
     listeningByStarId.delete(starId);
+    // The star's room now, which may differ from when it joined. The server
+    // only sees the stream close: a hidden tab, a closed tab, a dropped
+    // network and a restart all look the same. The star itself stays.
+    const leftRoom = roomOf(getById(db, starId));
+    audit({ action: "presence.left", actor: starActor(starId), room: leftRoom, reason: "stream_closed", clientsInRoom: glowingIn(leftRoom), result: "ok" });
     broadcastLiveStars();
   };
   req.on("close", close);
@@ -500,6 +549,7 @@ const server = createServer(async (req, res) => {
     } else if (req.method === "GET" && path === "/events") {
       handleEvents(req, res);
     } else if (req.method === "POST" && path.startsWith("/api/") && !isSameOrigin(req)) {
+      deny("request.denied", undefined, "cross_origin");
       sendJson(res, 403, { error: "cross-origin request rejected" });
     } else if (req.method === "POST" && path === "/api/star") {
       await handleCreateStar(req, res);

@@ -71,8 +71,11 @@ async function auditLines(match: (line: string) => boolean, count = 1): Promise<
 // Server output arrives asynchronously, so a setup star's own "created" line
 // can land after a naive reset and look like a stray log. Wait until every
 // setup star has been logged, then start counting afresh.
+// Each creation writes two lines, the action and then its broadcast, and the
+// pipe can deliver them in separate chunks; wait for both.
 async function settledReset(...ids: string[]): Promise<void> {
   await auditLines((l) => l.includes("action=star.created") && ids.some((id) => l.includes(id)), ids.length);
+  await auditLines((l) => l.includes("action=state.broadcast") && l.includes("change=star.created") && ids.some((id) => l.includes(id)), ids.length);
   output = "";
 }
 
@@ -103,7 +106,10 @@ it("two cookies create two stars, each audited under its own public star id", as
   const lines = await auditLines((l) => l.includes("action=star.created"), 2);
   const actors = lines.map((l) => field(l, "actor"));
   expect(actors).toEqual(expect.arrayContaining([`star:${a.star.id}`, `star:${b.star.id}`]));
-  for (const line of lines) expect(field(line, "result")).toBe("created");
+  for (const line of lines) {
+    expect(field(line, "result")).toBe("accepted");
+    expect(field(line, "room")).toBe("common");
+  }
 });
 
 it("B sending A's star id moves only B's star, and the log names B as actor and target", async () => {
@@ -124,7 +130,7 @@ it("B sending A's star id moves only B's star, and the log names B as actor and 
   const [line] = await auditLines((l) => l.includes("action=star.moved"));
   expect(field(line!, "actor")).toBe(`star:${b.star.id}`);
   expect(field(line!, "target")).toBe(`star:${b.star.id}`);
-  expect(field(line!, "result")).toBe("ok");
+  expect(field(line!, "result")).toBe("accepted");
   // The untrusted body id appears nowhere in the audit trail.
   expect(output).not.toContain(a.star.id);
 });
@@ -138,7 +144,8 @@ it("a move with no star of its own is denied, and logged as an anonymous denial"
 
   const [line] = await auditLines((l) => l.includes("action=star.move_denied"));
   expect(field(line!, "actor")).toBe("anonymous");
-  expect(field(line!, "result")).toBe("no_owned_star");
+  expect(field(line!, "result")).toBe("rejected");
+  expect(field(line!, "reason")).toBe("no_owned_star");
   expect(line).not.toContain(a.star.id);
 });
 
@@ -178,19 +185,25 @@ it("audit lines are single short key=value lines, one per action", async () => {
   expect(line!.length).toBeLessThan(160);
 });
 
-it("ordinary page loads and live streams write no audit lines", async () => {
+it("page loads write no audit lines; a live stream writes only its snapshot, join, leave and their broadcasts", async () => {
   const a = await createIdentity();
   await settledReset(a.star.id);
   await (await fetch(new URL("/", baseUrl), { headers: { Cookie: a.cookie } })).text();
   await (await fetch(new URL("/readme/", baseUrl))).text();
+  await (await fetch(new URL("/sky.js", baseUrl))).text();
+  await new Promise((r) => setTimeout(r, 200));
+  expect(output.split("\n").filter((l) => l.startsWith("audit "))).toEqual([]);
+
   const controller = new AbortController();
   const stream = await fetch(new URL("/events", baseUrl), { headers: { Cookie: a.cookie }, signal: controller.signal });
   const reader = stream.body!.getReader();
   await reader.read();
   await reader.cancel();
   controller.abort();
-  await new Promise((r) => setTimeout(r, 200));
-  expect(output.split("\n").filter((l) => l.startsWith("audit "))).toEqual([]);
+  await auditLines((l) => l.includes("action=presence.left"));
+  // Keep-alives and the stream's bytes are never logged: only these.
+  const actions = output.split("\n").filter((l) => l.startsWith("audit ")).map((l) => field(l, "action"));
+  expect(actions).toEqual(["state.snapshot", "presence.joined", "state.broadcast", "presence.left", "state.broadcast"]);
 });
 
 it("the audit helper refuses to print anything but safe labels, whatever it is handed", async () => {
