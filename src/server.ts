@@ -12,12 +12,16 @@ import {
 import {
   CONSTELLATIONS,
   CallsignTakenError,
+  createMessage,
   createStar,
   getByHash,
   getById,
   getCallsignByHash,
   getCallsignByNormalized,
   isConstellation,
+  isRoomKey,
+  listRoomMessages,
+  publicMessage,
   setCallsign,
   setConstellation,
   traceCounts,
@@ -29,6 +33,8 @@ import {
 } from "./db.ts";
 import type { Callsign, Constellation, Star } from "./db.ts";
 import { isReservedCallsign, isValidCallsignFormat, normalizeCallsign, trimCallsign, CALLSIGN_RULES } from "./callsign.ts";
+import { ChatRoomRegistry } from "./chat-rooms.ts";
+import { IdempotencyCache, RateLimiter, isValidIdempotencyKey } from "./message-limits.ts";
 import { renderHomePage } from "./render.ts";
 import { clampToRegion, settlePosition, spotInRegion } from "./regions.ts";
 import { renderMarkdown } from "./markdown.ts";
@@ -64,10 +70,29 @@ const db = openDb(DB_PATH);
 // that a human is physically present. A restart intentionally clears it.
 const eventStreams = new Set<ServerResponse>();
 const eventStreamsByStarId = new Map<string, Set<ServerResponse>>();
+// Keyed by token hash rather than star id, so a stream opened before any
+// star exists (e.g. right after choosing a callsign) can still be found
+// when that identity's first star is created — see handleCreateStar, which
+// is the one place this index is read.
+const eventStreamsByTokenHash = new Map<string, Set<ServerResponse>>();
 // Which Break mode a glowing star has pressed Play on. Memory only, like
 // glowing itself: a star stops counting the moment its last visible stream
 // closes, and a restart forgets everyone.
 const listeningByStarId = new Map<string, BreakMode>();
+
+// Which rooms' chat each open stream should receive. Membership is always
+// recomputed from stored data (a star's own constellation, plus "common"
+// for everyone), never asserted by the client: see handleEvents,
+// handleChooseConstellation and handleCreateStar for the three points that
+// write to this. The scoped broadcaster (broadcastMessage) is the only
+// thing allowed to send a chat event to a stream, and it only ever consults
+// this registry — there is no path that falls back to every open stream.
+const chatRooms = new ChatRoomRegistry<ServerResponse>();
+
+const messageRateLimiter = new RateLimiter();
+const messageIdempotency = new IdempotencyCache();
+const MESSAGE_MAX_LENGTH = 280;
+const MESSAGE_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 function isUnitInterval(n: unknown): n is number {
   return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
@@ -224,6 +249,23 @@ function broadcastStar(change: "created" | "moved" | "constellation", star: Star
   audit({ action: "state.broadcast", actor: starActor(star.id), room: roomOf(star), change: `star.${change}`, scope: "all", recipients: eventStreams.size, result: "sent" });
 }
 
+// Every glowing stream is a Common Room member; a stream whose star has
+// settled into a constellation is a member of that room too. This is the
+// only membership rule chat uses — never which view is currently on
+// screen, which the server has no way to know (see ADR, Phase 2 plan).
+function chatRoomsFor(star: { constellation: Constellation | null } | undefined): Room[] {
+  return star?.constellation ? ["common", star.constellation] : ["common"];
+}
+
+// The only function allowed to deliver a chat event: it consults chatRooms
+// and nothing else, so a stream never receives a room's messages for any
+// reason other than being a genuine, currently-recomputed member of it.
+function broadcastMessage(room: Room, event: string, body: unknown): void {
+  const recipients = chatRooms.streamsFor(room, eventStreams);
+  for (const stream of recipients) sendEvent(stream, event, body);
+  audit({ action: "state.broadcast", actor: ANONYMOUS, room, change: event, scope: "room", recipients: recipients.length, result: "sent" });
+}
+
 // A refused request, logged with why and never with what it carried.
 function deny(action: string, actor: string | undefined, reason: string): void {
   audit({ action, actor: actor ? starActor(actor) : ANONYMOUS, result: "rejected", reason });
@@ -310,12 +352,25 @@ async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Prom
   // ever placing a star) rather than minting a second one, so a callsign and
   // a star chosen in either order end up on the same identity.
   const token = issuedToken(req, res);
+  const tokenHash = hashToken(token);
   const now = new Date().toISOString();
   const id = randomUUID();
   // A tap inside the region keeps its place; with no tap, the star gets its
   // own spot there, so newcomers never stack on one point.
   if (constellation) ({ x, y } = placed ? settlePosition(constellation, id, x, y) : spotInRegion(constellation, id));
-  const star = createStar(db, { id, tokenHash: hashToken(token), x, y, now, constellation });
+  const star = createStar(db, { id, tokenHash, x, y, now, constellation });
+
+  // A visitor may have opened /events (and chosen a callsign) before this,
+  // its first star, existed. Any such stream is found by token hash, not
+  // star id (this star had no id to be keyed under until the line above),
+  // and is given both its star-id membership and its chat-room membership
+  // right now, in this same request — never requiring a reconnect.
+  const myStreams = eventStreamsByTokenHash.get(tokenHash);
+  if (myStreams && myStreams.size > 0) {
+    eventStreamsByStarId.set(id, new Set(myStreams));
+    const myRooms = chatRoomsFor(star);
+    for (const stream of myStreams) chatRooms.subscribe(stream, myRooms);
+  }
 
   sendJson(res, 201, { star: ownStar(star) });
   audit({ action: "star.created", actor: starActor(star.id), room: roomOf(star), result: "accepted" });
@@ -403,6 +458,11 @@ async function handleChooseConstellation(req: IncomingMessage, res: ServerRespon
     room: roomOf(star),
     result: "accepted",
   });
+  // Every one of this star's open streams now belongs to its new room, not
+  // the old one: recomputed in full (never added to), so leaving a
+  // constellation actually drops it, not just gains the new one alongside.
+  const myRooms = chatRoomsFor(star);
+  for (const stream of eventStreamsByStarId.get(star.id) ?? []) chatRooms.subscribe(stream, myRooms);
   broadcastStar("constellation", star);
   broadcastLiveStars();
 }
@@ -491,6 +551,100 @@ async function handleSetCallsign(req: IncomingMessage, res: ServerResponse): Pro
   });
 }
 
+// Posts a chat message. Phase 2 accepts only "common": a non-common room key
+// is a valid Room (isRoomKey passes it) but is refused here with its own
+// reason, since nothing else yet exists to deliver it to (Phase 3 lifts
+// this). Posting needs a callsign but never a star — Common Room membership
+// is "any entered visitor", not "a settled star" (that rule is Phase 3's,
+// for subject rooms only). The callsign in the stored/broadcast message is
+// always the server's own lookup; a callsign field in the request body, if
+// sent, is never read.
+async function handleCreateMessage(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const token = tokenFromRequest(req);
+  if (!token) {
+    deny("message.denied", undefined, "no_identity");
+    sendJson(res, 400, { error: "no identity" });
+    return;
+  }
+  const tokenHash = hashToken(token);
+  const callsign = getCallsignByHash(db, tokenHash);
+  if (!callsign) {
+    deny("message.denied", undefined, "no_callsign");
+    sendJson(res, 400, { error: "choose a callsign before sending a message" });
+    return;
+  }
+
+  const body = await readJsonBody(req);
+  if (body === undefined) {
+    deny("message.denied", undefined, "invalid_json");
+    sendJson(res, 400, { error: "invalid JSON" });
+    return;
+  }
+  const b = body as Record<string, unknown>;
+
+  if (!isRoomKey(b.room)) {
+    deny("message.denied", undefined, "invalid_room");
+    sendJson(res, 400, { error: "room must be a valid room key" });
+    return;
+  }
+  if (b.room !== "common") {
+    // Not yet reachable through the UI; refused explicitly rather than
+    // silently accepted and never delivered anywhere.
+    deny("message.denied", undefined, "room_not_available");
+    sendJson(res, 400, { error: "that room does not accept messages yet" });
+    return;
+  }
+  const room = b.room;
+
+  if (!isValidIdempotencyKey(b.idempotencyKey)) {
+    deny("message.denied", undefined, "invalid_idempotency_key");
+    sendJson(res, 400, { error: "a valid idempotencyKey is required" });
+    return;
+  }
+  const idempotencyKey = b.idempotencyKey;
+
+  if (typeof b.body !== "string") {
+    deny("message.denied", undefined, "invalid_body");
+    sendJson(res, 400, { error: "body must be a string" });
+    return;
+  }
+  const text = b.body.trim();
+  if (text.length < 1 || text.length > MESSAGE_MAX_LENGTH) {
+    deny("message.denied", undefined, "invalid_length");
+    sendJson(res, 400, { error: `body must be 1-${MESSAGE_MAX_LENGTH} characters` });
+    return;
+  }
+
+  const existingId = messageIdempotency.get(tokenHash, idempotencyKey);
+  if (existingId) {
+    sendJson(res, 200, { message: { id: existingId, callsign: callsign.callsign, body: text } });
+    return;
+  }
+
+  const now = Date.now();
+  if (!messageRateLimiter.recordAndCheck(tokenHash, now)) {
+    deny("message.denied", undefined, "rate_limited");
+    sendJson(res, 429, { error: "slow down a little before sending another message" });
+    return;
+  }
+
+  const nowIso = new Date(now).toISOString();
+  const expiresAt = new Date(now + MESSAGE_EXPIRY_MS).toISOString();
+  const id = randomUUID();
+  const message = createMessage(db, { id, room, tokenHash, callsignSnapshot: callsign.callsign, body: text, now: nowIso, expiresAt });
+  messageIdempotency.record(tokenHash, idempotencyKey, id, now);
+
+  const star = getByHash(db, tokenHash);
+  sendJson(res, 201, { message: publicMessage(message) });
+  audit({
+    action: "message.created",
+    actor: star ? starActor(star.id) : ANONYMOUS,
+    room,
+    result: "accepted",
+  });
+  broadcastMessage(room, "message.created", { v: 1, room, message: publicMessage(message) });
+}
+
 // A glowing star says which Break mode it pressed Play on, or { mode: null }
 // when it pauses or stops. Only a star with an open, visible stream can be
 // counted, so the count is never more than the glowing stars. Nothing is
@@ -554,6 +708,11 @@ function handleHere(req: IncomingMessage, res: ServerResponse): void {
 function handleEvents(req: IncomingMessage, res: ServerResponse): void {
   const identity = identityFromRequest(req);
   const starId = identity?.star.id;
+  // Read regardless of whether a star exists yet: this is the only way
+  // handleCreateStar can later find this same stream once a star is
+  // created, if the visitor opened /events before placing one.
+  const token = tokenFromRequest(req);
+  const tokenHash = token ? hashToken(token) : undefined;
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -570,16 +729,30 @@ function handleEvents(req: IncomingMessage, res: ServerResponse): void {
     streams.add(res);
     eventStreamsByStarId.set(starId, streams);
   }
+  if (tokenHash) {
+    const streams = eventStreamsByTokenHash.get(tokenHash) ?? new Set<ServerResponse>();
+    streams.add(res);
+    eventStreamsByTokenHash.set(tokenHash, streams);
+  }
+
+  // This stream's chat membership: Common Room always, plus its own star's
+  // settled constellation if it has one. Registered before the snapshot
+  // below is built, so the snapshot's own chat section already reflects it.
+  const myRooms = chatRoomsFor(identity?.star);
+  chatRooms.subscribe(res, myRooms);
 
   // The snapshot goes out first, then this stream joins the broadcast set.
   // All of this is synchronous, so no event can fall between the two, and
   // the snapshot already includes the live state this stream contributes.
   const { starIds, ...counts } = liveState();
   const stars = listAll(db).map(publicStar);
+  const now = new Date().toISOString();
+  const chat = myRooms.map((room) => ({ room, messages: listRoomMessages(db, room, now).map(publicMessage) }));
   sendEvent(res, "sync", {
     stars,
     liveStarIds: starIds,
     ...counts,
+    chat,
   });
   const room = roomOf(identity?.star);
   audit({ action: "state.snapshot", actor: starId ? starActor(starId) : ANONYMOUS, room, stars: stars.length, result: "sent" });
@@ -599,6 +772,14 @@ function handleEvents(req: IncomingMessage, res: ServerResponse): void {
     closed = true;
     clearInterval(heartbeat);
     eventStreams.delete(res);
+    chatRooms.unsubscribe(res);
+    if (tokenHash) {
+      const byToken = eventStreamsByTokenHash.get(tokenHash);
+      if (byToken) {
+        byToken.delete(res);
+        if (byToken.size === 0) eventStreamsByTokenHash.delete(tokenHash);
+      }
+    }
     if (!starId) return;
     const streams = eventStreamsByStarId.get(starId);
     if (!streams) return;
@@ -679,6 +860,8 @@ const server = createServer(async (req, res) => {
       await handleChooseConstellation(req, res);
     } else if (req.method === "POST" && path === "/api/callsign") {
       await handleSetCallsign(req, res);
+    } else if (req.method === "POST" && path === "/api/message") {
+      await handleCreateMessage(req, res);
     } else if (req.method === "POST" && path === "/api/here") {
       handleHere(req, res);
     } else if (req.method === "POST" && path === "/api/listening") {
@@ -690,13 +873,21 @@ const server = createServer(async (req, res) => {
     // Enough to debug, nothing more: the method, which known route failed,
     // and the error's class. Never the message, stack, URL, headers or body,
     // any of which could carry something private.
-    const route = ["/", "/readme/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/star/constellation", "/api/callsign", "/api/here", "/api/listening"]
+    const route = ["/", "/readme/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/star/constellation", "/api/callsign", "/api/message", "/api/here", "/api/listening"]
       .find((r) => req.url?.split("?")[0] === r) ?? "other";
     const kind = err instanceof Error ? err.constructor.name : "unknown";
     console.error(`error method=${req.method ?? "?"} route=${route} kind=${kind}`);
     sendJson(res, 500, { error: "internal error" });
   }
 });
+
+// Bounds the rate-limiter and idempotency maps so a one-time poster's state
+// does not sit in memory forever; same style as the existing SSE heartbeat.
+setInterval(() => {
+  const now = Date.now();
+  messageRateLimiter.sweep(now);
+  messageIdempotency.sweep(now);
+}, 60_000);
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`listening on 0.0.0.0:${PORT}, db at ${DB_PATH}`);
