@@ -919,6 +919,70 @@ export function renderHomePage(
   .chip-button[aria-pressed="true"]::before { content: "✓ "; }
   @media (pointer: coarse) and (min-width: 761px) { .chip-button { min-height: var(--target); } }
 
+  /* ---- Chat ----------------------------------------------------------
+     A quiet conversation drawer, never a social feed: small on purpose,
+     never covering the star field, text only. */
+  .chat-panel {
+    position: absolute;
+    z-index: 6;
+    top: calc(var(--topbar-h) + var(--space-2));
+    right: var(--gutter);
+    box-sizing: border-box;
+    width: min(23rem, calc(100% - 2 * var(--gutter)));
+    max-height: calc(100% - var(--topbar-h) - var(--space-6));
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-4) var(--space-5) var(--space-5);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-2);
+    background: var(--color-surface-strong);
+    -webkit-backdrop-filter: blur(20px) saturate(1.15);
+    backdrop-filter: blur(20px) saturate(1.15);
+    box-shadow: var(--elev-2);
+  }
+  .chat-head { display: flex; align-items: center; justify-content: space-between; }
+  #chat-title { margin: 0; font: 400 var(--text-lg)/1.2 var(--font-display); color: var(--color-ink); }
+  .chat-intro { margin-top: var(--space-1) !important; color: var(--color-ink-muted); font-size: var(--text-xs); line-height: 1.4; }
+  .chat-messages {
+    flex: 1;
+    min-height: 6rem;
+    max-height: 18rem;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .chat-message { display: grid; gap: 0.1rem; }
+  .chat-message-head { display: flex; align-items: baseline; gap: var(--space-2); }
+  .chat-message-callsign { color: var(--color-gold); font: 600 var(--text-xs)/1.2 var(--font-mono); letter-spacing: 0.02em; }
+  .chat-message-time { color: var(--color-ink-soft); font-size: var(--text-xs); }
+  .chat-message-body { color: var(--color-ink); font-size: var(--text-sm); line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  /* Own messages are distinguished by a left rule, not colour alone. */
+  .chat-message[data-own="true"] { border-left: 2px solid var(--color-gold); padding-left: var(--space-2); }
+  .chat-form { display: flex; gap: var(--space-2); margin-top: var(--space-3); align-items: flex-end; }
+  #chat-input {
+    flex: 1;
+    min-height: var(--target);
+    max-height: 6rem;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-1);
+    background: rgba(244, 238, 226, 0.03);
+    color: var(--color-ink);
+    font: inherit;
+    resize: none;
+  }
+  #chat-input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+  #chat-input:disabled { opacity: 0.5; }
+  .chat-note { margin-top: var(--space-2) !important; color: var(--color-ink-muted); font-size: var(--text-xs); }
+  #chat-note:empty { display: none; }
+  #chat-error { margin-top: var(--space-2) !important; color: #f1c5c5; font-size: var(--text-xs); min-height: 1em; }
+  #chat-error:empty { display: none; }
+  .chat-credit { margin-top: var(--space-3) !important; color: var(--color-ink-muted); font-size: var(--text-xs); line-height: 1.4; }
+
   /* ---- Break -------------------------------------------------------------
      A compact drawer for a short break, not another page. */
   .break-panel {
@@ -991,7 +1055,7 @@ export function renderHomePage(
     .dock-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
     .dock-you { flex: 1 1 15rem; }
     .legend-toggle { flex-basis: auto; margin-left: auto; }
-    .break-panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 82%; border-radius: var(--radius-2) var(--radius-2) 0 0; padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom)); }
+    .break-panel, .chat-panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 82%; border-radius: var(--radius-2) var(--radius-2) 0 0; padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom)); }
   }
   @media (max-width: 760px) {
     #sky-app { --gutter: 1rem; --text-display: 1.85rem; --topbar-h: 6rem; }
@@ -1067,6 +1131,10 @@ export function renderHomePage(
       </ul>
     </nav>
     <div class="tools">
+      <button type="button" id="chat-toggle" class="tool-button" aria-expanded="false" aria-controls="chat-panel" aria-label="Common Room conversation">
+        <svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M30 60a20 20 0 0 1 20-20h140a20 20 0 0 1 20 20v90a20 20 0 0 1-20 20H110l-45 35v-35H50a20 20 0 0 1-20-20z"></path></svg>
+        <span class="tool-label">Chat</span>
+      </button>
       <button type="button" id="break-toggle" class="tool-button" aria-expanded="false" aria-controls="break-panel" aria-label="Break: music for a short break">
         <svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M96 44v112a28 28 0 1 1-16-25V70l112-26v96a28 28 0 1 1-16-25V64z"></path></svg>
         <span class="tool-label">Break</span>
@@ -1132,6 +1200,23 @@ export function renderHomePage(
       <li data-legend="you"><span class="swatch swatch-you" aria-hidden="true"></span>You</li>
       <li class="legend-toggle"><button type="button" id="traces-toggle" class="chip-button" aria-pressed="true">Past traces</button></li>
     </ul>
+  </section>
+
+  <section id="chat-panel" class="chat-panel" aria-labelledby="chat-title" hidden>
+    <div class="chat-head">
+      <h2 id="chat-title">Common Room conversation</h2>
+      <button type="button" id="chat-close" class="icon-close" aria-label="Close the conversation"><span aria-hidden="true">×</span></button>
+    </div>
+    <p class="chat-intro">Messages disappear after 24 hours.</p>
+    <ul id="chat-messages" class="chat-messages" aria-live="polite" aria-label="Messages"></ul>
+    <form id="chat-form" class="chat-form">
+      <label for="chat-input" class="sr-only">Message</label>
+      <textarea id="chat-input" maxlength="280" rows="2" placeholder="Say something quiet" disabled></textarea>
+      <button type="submit" class="lounge-button" disabled>Send</button>
+    </form>
+    <p id="chat-note" class="chat-note">Choose a callsign to send a message.</p>
+    <p id="chat-error" role="alert" aria-live="assertive"></p>
+    <p class="chat-credit">Keep it kind. Do not share personal information.</p>
   </section>
 
   <section id="break-panel" class="break-panel" aria-labelledby="break-title" hidden>

@@ -413,12 +413,16 @@ it("the live line and the doorways update from live events, without a reload", a
   }
 });
 
-it("no discussion, chat or location feature appears, not even as a disabled card", async () => {
+it("no fake discussion or location feature appears, not even as a disabled placeholder card", async () => {
   const p = await open();
   try {
     const app = text(p.doc.getElementById("sky-app")).toLowerCase();
-    expect(app).not.toMatch(/\bchat\b|discussion|coming soon|\bnearby\b|location|\bkm\b/);
-    expect(p.doc.querySelectorAll("#sky-app [disabled]")).toHaveLength(0);
+    expect(app).not.toMatch(/discussion|coming soon|\bnearby\b|location|\bkm\b/);
+    // Common Room chat is a real, built feature (ADR 0012's follow-on); its
+    // composer is legitimately disabled until a callsign exists, which is a
+    // real functional gate, not a decorative "coming soon" placeholder.
+    const disabled = [...p.doc.querySelectorAll("#sky-app [disabled]")];
+    expect(disabled.every((el) => el.id === "chat-input" || el.closest("#chat-form"))).toBe(true);
   } finally {
     p.close();
   }

@@ -74,9 +74,11 @@ it("the inside of the lounge describes only what is built", async () => {
   expect(visibleText(app.querySelector(".wordmark")!)).toBe("Overlap");
   const text = visibleText(app).toLowerCase();
   expect(text).toContain("place your star. settle in. you are not studying alone.");
-  // No chat, no fake discussion or location, nothing promised that is not
-  // built. Break is built (real tracks), so music is allowed to be named.
-  expect(text).not.toMatch(/\bchat\b|\bmessage\b|\bambience\b|\btimer\b|discussion|simulated|prototype|observatory|\blater\b|\bsky\b|coming soon|nearby/);
+  // No fake ambience, location or discussion placeholder, nothing promised
+  // that is not built. Break is built (real tracks), so music is allowed to
+  // be named; Common Room chat is now built too (ADR 0012's follow-on), so
+  // "chat"/"message" are allowed the same way.
+  expect(text).not.toMatch(/\bambience\b|\btimer\b|discussion|simulated|prototype|observatory|\blater\b|\bsky\b|coming soon|nearby/);
   expect(app.querySelector(".discussion")).toBeNull();
   // The Common Room and exactly the five constellations, as real links.
   const views = [...app.querySelectorAll("nav.lounge-nav a[data-view]")].map((a) => a.getAttribute("data-view"));

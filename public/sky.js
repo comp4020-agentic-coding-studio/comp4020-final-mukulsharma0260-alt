@@ -589,6 +589,8 @@ function startRealtime() {
     applyCounts(data);
     render();
     renderBreak();
+    const common = (data.chat ?? []).find((c) => c.room === "common");
+    if (common) replaceChatMessages(common.messages ?? []);
   });
   realtime.addEventListener("star", (event) => {
     const { change, star } = JSON.parse(event.data);
@@ -605,6 +607,10 @@ function startRealtime() {
     applyCounts(JSON.parse(event.data));
     render();
     renderBreak();
+  });
+  realtime.addEventListener("message.created", (event) => {
+    const { room, message } = JSON.parse(event.data);
+    if (room === "common") appendChatMessage(message);
   });
   realtime.addEventListener("error", () => {
     setText("live-line", "Reconnecting to the lounge…");
@@ -910,6 +916,7 @@ async function submitCallsign(value) {
   callsignCurrent.hidden = false;
   showCallsignForm(false);
   announce(`You are ${callsign.callsign}.`);
+  renderChatComposer();
 }
 
 function wireCallsign() {
@@ -925,6 +932,129 @@ function wireCallsign() {
   });
   document.getElementById("callsign-change")?.addEventListener("click", () => showCallsignForm(true));
   callsignCancel?.addEventListener("click", () => showCallsignForm(false));
+}
+
+// ---- Chat ---------------------------------------------------------------
+// Common Room conversation (Phase 2). A quiet drawer, never a feed: text
+// only, rendered with textContent, never innerHTML. The composer is
+// disabled until a callsign exists; posting never requires a star.
+
+const chatToggle = document.getElementById("chat-toggle");
+const chatPanel = document.getElementById("chat-panel");
+const chatMessages = document.getElementById("chat-messages");
+const chatForm = document.getElementById("chat-form");
+const chatInput = document.getElementById("chat-input");
+const chatError = document.getElementById("chat-error");
+const chatNote = document.getElementById("chat-note");
+const chatSeenIds = new Set();
+
+function hasCallsign() {
+  return document.body.dataset.hasCallsign === "true";
+}
+
+function chatTime(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+// Builds one message's markup from scratch with createElement/textContent
+// only, never a template string: a message body can contain anything a
+// visitor typed, including "<script>", and must never be parsed as HTML.
+function renderChatMessage(message) {
+  const li = document.createElement("li");
+  li.className = "chat-message";
+  const own = message.callsign === document.body.dataset.callsign;
+  li.dataset.own = String(own);
+
+  const head = document.createElement("div");
+  head.className = "chat-message-head";
+  const callsign = document.createElement("span");
+  callsign.className = "chat-message-callsign";
+  callsign.textContent = message.callsign + (own ? " (you)" : "");
+  const time = document.createElement("span");
+  time.className = "chat-message-time";
+  time.textContent = chatTime(message.createdAt);
+  head.append(callsign, time);
+
+  const body = document.createElement("div");
+  body.className = "chat-message-body";
+  body.textContent = message.body;
+
+  li.append(head, body);
+  return li;
+}
+
+function appendChatMessage(message) {
+  if (chatSeenIds.has(message.id)) return;
+  chatSeenIds.add(message.id);
+  chatMessages?.append(renderChatMessage(message));
+  if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function replaceChatMessages(messages) {
+  if (!chatMessages) return;
+  chatMessages.textContent = "";
+  chatSeenIds.clear();
+  for (const m of messages) appendChatMessage(m);
+}
+
+function renderChatComposer() {
+  const enabled = hasCallsign();
+  if (chatInput) chatInput.disabled = !enabled;
+  const submit = chatForm?.querySelector("button[type=submit]");
+  if (submit) submit.disabled = !enabled;
+  if (chatNote) chatNote.textContent = enabled ? "" : "Choose a callsign to send a message.";
+}
+
+function openChat(open) {
+  if (!chatPanel || !chatToggle) return;
+  chatPanel.hidden = !open;
+  chatToggle.setAttribute("aria-expanded", String(open));
+  if (open) {
+    renderChatComposer();
+    (hasCallsign() ? chatInput : document.getElementById("callsign-input"))?.focus();
+  } else {
+    chatToggle.focus();
+  }
+}
+
+async function submitChatMessage(text) {
+  chatError.textContent = "";
+  let res;
+  try {
+    res = await fetch("/api/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room: "common", body: text, idempotencyKey: crypto.randomUUID() }),
+    });
+  } catch {
+    chatError.textContent = "Could not send that message. Check your connection and try again.";
+    return;
+  }
+  if (!res.ok) {
+    const { error } = await res.json().catch(() => ({ error: "Could not send that message. Please try again." }));
+    chatError.textContent = error ?? "Could not send that message. Please try again.";
+    return;
+  }
+  // The live "message.created" event (delivered to this same stream, since
+  // it is a Common Room member too) is what actually appends the message;
+  // this only clears the composer once the send is confirmed.
+  chatInput.value = "";
+}
+
+function wireChat() {
+  if (!chatPanel || !chatToggle) return;
+  chatToggle.addEventListener("click", () => openChat(chatPanel.hidden));
+  document.getElementById("chat-close")?.addEventListener("click", () => openChat(false));
+  chatForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    submitChatMessage(text);
+  });
 }
 
 // A check-in counts this browser's own star as seen, so it is only for a
@@ -1411,6 +1541,8 @@ function activateSky({ remember = false } = {}) {
   wireBreak();
   wireTraces();
   wireCallsign();
+  wireChat();
+  renderChatComposer();
 
   // Every link to a view changes view in place; the address bar follows.
   for (const a of document.querySelectorAll("a[data-view]")) {
@@ -1451,6 +1583,7 @@ function activateSky({ remember = false } = {}) {
     }
     if (e.key !== "Escape") return;
     if (!skyActive) enterLounge();
+    else if (chatPanel && !chatPanel.hidden) openChat(false);
     else if (breakPanel && !breakPanel.hidden) openBreak(false);
     else if (picked) setPicked(false);
   });
