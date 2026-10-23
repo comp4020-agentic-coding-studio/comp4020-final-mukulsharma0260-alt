@@ -396,11 +396,27 @@ export function createMessage(
 
 // Unexpired messages in a room, oldest first. The expiry filter is here,
 // not only in a separate sweep job, so an expired message can never be
-// read back even if no sweep has run yet (Phase 4 adds the sweep; this
-// filter is what actually enforces expiry on every read path).
+// read back even if no sweep has run yet (deleteExpiredMessages below is
+// the sweep; this filter is what actually enforces expiry on every read
+// path, independent of whether that sweep has run).
 export function listRoomMessages(db: DatabaseSync, room: Room, nowIso: string): Message[] {
   const rows = db
     .prepare("SELECT * FROM messages WHERE room = ? AND expires_at > ? ORDER BY created_at ASC")
     .all(room, nowIso) as unknown as MessageRow[];
   return rows.map(fromMessageRow);
+}
+
+// Deletes every message past its expiry and reports exactly which ones, so
+// the caller can tell currently-connected visitors their room just lost
+// those messages (a live message.expired event). This is the only thing
+// that actually frees storage: listRoomMessages's filter above already
+// makes an expired row unreadable before this ever runs, so a delayed or
+// skipped sweep is a storage cost, never a correctness or privacy gap.
+export function deleteExpiredMessages(db: DatabaseSync, nowIso: string): Array<{ id: string; room: Room }> {
+  const rows = db
+    .prepare("SELECT id, room FROM messages WHERE expires_at <= ?")
+    .all(nowIso) as unknown as Array<{ id: string; room: string }>;
+  if (rows.length === 0) return [];
+  db.prepare("DELETE FROM messages WHERE expires_at <= ?").run(nowIso);
+  return rows.map((r) => ({ id: r.id, room: r.room as Room }));
 }

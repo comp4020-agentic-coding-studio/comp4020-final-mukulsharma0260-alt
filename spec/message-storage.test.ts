@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { createMessage, isRoomKey, listRoomMessages, openDb, publicMessage, setCallsign } from "../src/db.ts";
+import { createMessage, deleteExpiredMessages, isRoomKey, listRoomMessages, openDb, publicMessage, setCallsign } from "../src/db.ts";
 
 // The messages table and its src/db.ts functions, checked directly against a
 // standalone database (no server, no routes — those land in a later
@@ -134,6 +134,54 @@ describe("createMessage / listRoomMessages", () => {
       const pub = publicMessage(message);
       expect(Object.keys(pub).sort()).toEqual(["body", "callsign", "createdAt", "id"]);
       expect(JSON.stringify(pub)).not.toContain("secret-hash-value");
+      db.close();
+    });
+  });
+});
+
+describe("deleteExpiredMessages (expiry guarantee 2: eventual deletion)", () => {
+  it("deletes a message past its expiry and reports its id and room", () => {
+    withDb((dbPath) => {
+      const db = openDb(dbPath);
+      const now = new Date().toISOString();
+      const past = new Date(Date.now() - 1000).toISOString();
+      withCallsign(db, "a".repeat(64), "a", now);
+      createMessage(db, { id: "msg-1", room: "engineering", tokenHash: "a".repeat(64), callsignSnapshot: "a", body: "old", now, expiresAt: past });
+      const deleted = deleteExpiredMessages(db, now);
+      expect(deleted).toEqual([{ id: "msg-1", room: "engineering" }]);
+      const row = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE id = ?").get("msg-1") as { n: number };
+      expect(row.n).toBe(0);
+      db.close();
+    });
+  });
+
+  it("leaves an unexpired message untouched and reports nothing for it", () => {
+    withDb((dbPath) => {
+      const db = openDb(dbPath);
+      const now = new Date().toISOString();
+      const future = new Date(Date.now() + 86_400_000).toISOString();
+      withCallsign(db, "a".repeat(64), "a", now);
+      createMessage(db, { id: "msg-1", room: "common", tokenHash: "a".repeat(64), callsignSnapshot: "a", body: "fresh", now, expiresAt: future });
+      expect(deleteExpiredMessages(db, now)).toEqual([]);
+      const row = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE id = ?").get("msg-1") as { n: number };
+      expect(row.n).toBe(1);
+      db.close();
+    });
+  });
+
+  it("reports every expired message grouped correctly, across multiple rooms", () => {
+    withDb((dbPath) => {
+      const db = openDb(dbPath);
+      const now = new Date().toISOString();
+      const past = new Date(Date.now() - 1000).toISOString();
+      withCallsign(db, "a".repeat(64), "a", now);
+      createMessage(db, { id: "msg-1", room: "common", tokenHash: "a".repeat(64), callsignSnapshot: "a", body: "old1", now, expiresAt: past });
+      createMessage(db, { id: "msg-2", room: "science", tokenHash: "a".repeat(64), callsignSnapshot: "a", body: "old2", now, expiresAt: past });
+      const deleted = deleteExpiredMessages(db, now);
+      expect(deleted.sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+        { id: "msg-1", room: "common" },
+        { id: "msg-2", room: "science" },
+      ]);
       db.close();
     });
   });
