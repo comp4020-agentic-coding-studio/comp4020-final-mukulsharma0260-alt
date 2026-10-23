@@ -2,7 +2,7 @@
 
 A visitor may choose an anonymous callsign, independent of any star
 
-# Status: Accepted (amended: Common Room chat)
+# Status: Accepted (amended: Common Room chat; amended again: subject-room chat)
 
 # Context
 
@@ -217,11 +217,70 @@ later change, gated on proving they cannot leak into each other).
 
 ## Consequences (chat)
 
-- A message posted to a non-`common` room key is refused outright today,
-  not silently accepted; the UI never offers one, since no subject-room
-  conversation exists to send it to yet.
 - A restart clears the rate limiter and idempotency cache, the same
   accepted cost as every other in-memory-only state in this app.
 - `docs/terms.md` gains **callsign** and **conversation**; "Common Room" and
   "constellation" keep their existing meanings and existing rule (a
   constellation is never called a room) unchanged.
+
+# Amendment: subject-room (constellation) chat
+
+Each constellation gets its own conversation, reusing the room-scoped
+delivery mechanism the Common Room amendment already built — no new
+transport, no new schema.
+
+- **Posting rule.** `POST /api/message` for a non-`common` room now succeeds
+  only when the poster's own star is, right now, settled in that exact
+  constellation (`star.constellation === room`), re-checked from the
+  database on every request — never from a client-asserted "I am looking at
+  this room." There is no read-only or preview posting state: a visitor
+  with no star there sees the same honest refusal
+  (`reason=not_settled`, *"settle your star in `<room>` to join this
+  conversation"*) whether they have a star elsewhere, no star at all, or a
+  callsign but nothing settled. This replaces the Phase-2 placeholder
+  refusal (`reason=room_not_available`, which existed only because nothing
+  could yet be posted to a non-`common` room).
+- **No new SSE mechanism.** `chatRoomsFor` already computed `["common",
+  star.constellation]` for a settled star (built, unused until now, in the
+  Common Room amendment); a constellation's messages were always only ever
+  going to reach a stream through the same `ChatRoomRegistry` the Common
+  Room already uses. Reading a constellation's conversation was therefore
+  already correctly gated by the existing membership mechanism before this
+  amendment touched anything — only the *posting* rule needed to change.
+- **The gate, proven directly.** Two real, separately settled identities —
+  one in Engineering, one in Science — exchange messages while both keep an
+  open `/events` stream. The Engineering message's `message.created` event,
+  and the text itself, are asserted absent from every raw SSE frame the
+  Science stream receives, not merely absent from its rendered UI
+  (`spec/chat-subject-rooms.test.ts`). Demonstrated red/green: reverting
+  `chatRoomsFor` to return every room makes this test (and a second one,
+  checking an unsettled visitor's `sync` snapshot) fail immediately.
+- **Membership recompute, already built, now exercised.** Settling into a
+  constellation, leaving one, and moving between two are all covered:
+  leaving immediately revokes posting there; moving from Engineering to
+  Science revokes the old room and grants the new one on the *same*,
+  never-reconnected stream (both already implemented in the Common Room
+  amendment for the general case; this amendment is the first time a
+  non-`common` room exercises them end to end).
+- **Client**: the drawer is now room-aware. Its title, composer
+  enabled/disabled state, and message list all reflect `view` — the
+  constellation currently open, or the Common Room. Each room keeps its own
+  in-memory message history on the client, so switching views never loses
+  or mixes another room's messages; switching to an unsettled constellation
+  shows the same honest *"Settle your star in `<room>` to join this
+  conversation"* copy the server would give if posting were attempted
+  anyway, kept in sync with it word-for-word. This is UI-only reflection:
+  the server is re-checked on every post regardless of what the client
+  currently shows as enabled.
+
+## Consequences (subject-room chat)
+
+- A visitor cannot read or post a constellation's conversation by merely
+  viewing it — only by actually settling a star there, matching the
+  product's existing "a constellation is a place your star goes, not a tab
+  you browse" posture.
+- Moving constellations costs a visitor nothing extra: their messages in
+  the old room stay (never deleted), and they can post in the new room
+  immediately, including on an already-open stream.
+- `docs/audit-logging.md`'s `message.denied` reasons gain `not_settled` and
+  drop the now-unreachable `room_not_available`.

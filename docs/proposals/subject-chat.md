@@ -1,9 +1,11 @@
 # Recommendation: anonymous subject chat (not built)
 
-Status: Common Room chat is now built (ADR 0012's amendment). Subject
-(per-constellation) chat — this proposal's original scope — is still not
-built; it is the next change, gated on proving cross-room content isolation
-before any subject room becomes postable.
+Status: built. Both Common Room chat and subject (per-constellation) chat —
+this proposal's original scope — now ship, under ADR 0012's two amendments.
+Cross-room content isolation was proven directly before subject rooms became
+postable: two real settled identities, Engineering and Science, with the
+Engineering message's content asserted absent from the Science stream's raw
+SSE frames (`spec/chat-subject-rooms.test.ts`), not merely hidden by the UI.
 
 **Update**: the naming idea below (an anonymous, server-generated per-day
 label such as "Star 4F") is superseded by a user-chosen, persistent callsign
