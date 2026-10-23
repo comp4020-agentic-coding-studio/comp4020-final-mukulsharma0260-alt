@@ -516,6 +516,7 @@ function setView(next, { push = true } = {}) {
   render();
   drawFigures();
   placeDoorways();
+  if (changed) refreshChatForView();
   // On a narrow screen the navigation scrolls sideways: keep the current
   // view's link in sight.
   if (changed) navLinks.find((a) => a.dataset.view === view)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
@@ -551,6 +552,7 @@ async function chooseConstellation(body) {
   document.body.dataset.constellation = star.constellation ?? "";
   stars.set(star.id, { ...stars.get(star.id), id: star.id, x: star.x, y: star.y, constellation: star.constellation ?? null, brightness: "bright" });
   render();
+  renderChatComposer();
   return true;
 }
 
@@ -589,8 +591,9 @@ function startRealtime() {
     applyCounts(data);
     render();
     renderBreak();
-    const common = (data.chat ?? []).find((c) => c.room === "common");
-    if (common) replaceChatMessages(common.messages ?? []);
+    // Every room this stream is a member of (Common Room, plus a settled
+    // constellation if any) comes back here; replace each one's history.
+    for (const c of data.chat ?? []) replaceChatRoom(c.room, c.messages ?? []);
   });
   realtime.addEventListener("star", (event) => {
     const { change, star } = JSON.parse(event.data);
@@ -599,7 +602,11 @@ function startRealtime() {
     // coming back must not snap it.
     if (star.id === ownId() && dragging) return;
     stars.set(star.id, { ...stars.get(star.id), ...star });
-    if (star.id === ownId()) document.body.dataset.constellation = star.constellation ?? "";
+    if (star.id === ownId()) {
+      document.body.dataset.constellation = star.constellation ?? "";
+      // Settling or leaving changes which room this visitor may post to.
+      renderChatComposer();
+    }
     render();
     if (change === "created") arrive(star.id);
   });
@@ -610,7 +617,7 @@ function startRealtime() {
   });
   realtime.addEventListener("message.created", (event) => {
     const { room, message } = JSON.parse(event.data);
-    if (room === "common") appendChatMessage(message);
+    receiveChatMessage(room, message);
   });
   realtime.addEventListener("error", () => {
     setText("live-line", "Reconnecting to the lounge…");
@@ -861,6 +868,7 @@ async function placeStar(x, y, constellation) {
   // Ownership comes from this reply, never from the broadcast.
   stars.set(star.id, { ...stars.get(star.id), id: star.id, x: star.x, y: star.y, brightness: "bright", constellation: star.constellation ?? null });
   render();
+  renderChatComposer();
   arrive(star.id);
   announce(constellation ? `Your star joined ${INFO[constellation]?.name}.` : "Your star joined the Common Room.");
   starNodes.get(star.id)?.focus();
@@ -935,21 +943,46 @@ function wireCallsign() {
 }
 
 // ---- Chat ---------------------------------------------------------------
-// Common Room conversation (Phase 2). A quiet drawer, never a feed: text
-// only, rendered with textContent, never innerHTML. The composer is
-// disabled until a callsign exists; posting never requires a star.
+// The Common Room conversation (Phase 2) and each constellation's own
+// conversation (Phase 3). A quiet drawer, never a feed: text only, rendered
+// with textContent, never innerHTML. The composer is disabled until a
+// callsign exists; Common Room posting never requires a star, but a
+// constellation's conversation requires the visitor's own star to be
+// genuinely, currently settled there — the server is the only source of
+// truth for that, this UI only reflects it honestly (no read-only preview).
 
 const chatToggle = document.getElementById("chat-toggle");
 const chatPanel = document.getElementById("chat-panel");
+const chatTitle = document.getElementById("chat-title");
 const chatMessages = document.getElementById("chat-messages");
 const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const chatError = document.getElementById("chat-error");
 const chatNote = document.getElementById("chat-note");
-const chatSeenIds = new Set();
+// One message list per room, kept in memory so switching views doesn't lose
+// a room's history; only the current room's messages are ever shown.
+const chatMessagesByRoom = new Map();
+const chatSeenIdsByRoom = new Map();
 
 function hasCallsign() {
   return document.body.dataset.hasCallsign === "true";
+}
+
+// The room this drawer currently shows: the Common Room, or whichever
+// constellation view is open. Matches the server's own room keys exactly
+// (view is already one of AREAS or "common").
+function currentChatRoom() {
+  return view;
+}
+
+// Whether this visitor may currently post to the open room: Common Room
+// needs only a callsign; a constellation needs the visitor's own star
+// settled there right now. This mirrors the server's rule for UI purposes
+// only — the server re-checks it independently on every post.
+function canPostToCurrentRoom() {
+  if (!hasCallsign()) return false;
+  const room = currentChatRoom();
+  return room === "common" || ownArea() === room;
 }
 
 function chatTime(iso) {
@@ -987,26 +1020,67 @@ function renderChatMessage(message) {
   return li;
 }
 
-function appendChatMessage(message) {
-  if (chatSeenIds.has(message.id)) return;
-  chatSeenIds.add(message.id);
-  chatMessages?.append(renderChatMessage(message));
-  if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+// Stores a message under its room, and — only if that room is the one
+// currently shown — appends it to the visible list too.
+function receiveChatMessage(room, message) {
+  const seen = chatSeenIdsByRoom.get(room) ?? new Set();
+  chatSeenIdsByRoom.set(room, seen);
+  if (seen.has(message.id)) return;
+  seen.add(message.id);
+  const list = chatMessagesByRoom.get(room) ?? [];
+  list.push(message);
+  chatMessagesByRoom.set(room, list);
+  if (room === currentChatRoom() && chatMessages) {
+    chatMessages.append(renderChatMessage(message));
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
 }
 
-function replaceChatMessages(messages) {
+function replaceChatRoom(room, messages) {
+  chatMessagesByRoom.set(room, [...messages]);
+  chatSeenIdsByRoom.set(room, new Set(messages.map((m) => m.id)));
+  if (room === currentChatRoom()) renderCurrentChatRoom();
+}
+
+// Redraws the message list from this room's own stored history (never
+// re-fetches): used when switching rooms, so a room's messages are exactly
+// what this browser has already been sent for it.
+function renderCurrentChatRoom() {
   if (!chatMessages) return;
+  const room = currentChatRoom();
   chatMessages.textContent = "";
-  chatSeenIds.clear();
-  for (const m of messages) appendChatMessage(m);
+  for (const m of chatMessagesByRoom.get(room) ?? []) chatMessages.append(renderChatMessage(m));
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function chatRoomTitle(room) {
+  return room === "common" ? "Common Room conversation" : `${INFO[room]?.name ?? room} conversation`;
 }
 
 function renderChatComposer() {
-  const enabled = hasCallsign();
+  const room = currentChatRoom();
+  if (chatTitle) chatTitle.textContent = chatRoomTitle(room);
+  const settled = room === "common" || ownArea() === room;
+  const enabled = hasCallsign() && settled;
   if (chatInput) chatInput.disabled = !enabled;
   const submit = chatForm?.querySelector("button[type=submit]");
   if (submit) submit.disabled = !enabled;
-  if (chatNote) chatNote.textContent = enabled ? "" : "Choose a callsign to send a message.";
+  if (chatNote) {
+    chatNote.textContent = !settled
+      ? `Settle your star in ${INFO[room]?.name ?? room} to join this conversation.`
+      : !hasCallsign()
+        ? "Choose a callsign to send a message."
+        : "";
+  }
+}
+
+// Called whenever the view changes (setView) or settling/leaving a
+// constellation changes which rooms this visitor may post to — both the
+// visible message list and the composer's enabled state depend on the
+// current room, so both are refreshed together.
+function refreshChatForView() {
+  renderCurrentChatRoom();
+  renderChatComposer();
 }
 
 function openChat(open) {
@@ -1014,7 +1088,7 @@ function openChat(open) {
   chatPanel.hidden = !open;
   chatToggle.setAttribute("aria-expanded", String(open));
   if (open) {
-    renderChatComposer();
+    refreshChatForView();
     (hasCallsign() ? chatInput : document.getElementById("callsign-input"))?.focus();
   } else {
     chatToggle.focus();
@@ -1023,12 +1097,13 @@ function openChat(open) {
 
 async function submitChatMessage(text) {
   chatError.textContent = "";
+  const room = currentChatRoom();
   let res;
   try {
     res = await fetch("/api/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room: "common", body: text, idempotencyKey: crypto.randomUUID() }),
+      body: JSON.stringify({ room, body: text, idempotencyKey: crypto.randomUUID() }),
     });
   } catch {
     chatError.textContent = "Could not send that message. Check your connection and try again.";
@@ -1040,8 +1115,8 @@ async function submitChatMessage(text) {
     return;
   }
   // The live "message.created" event (delivered to this same stream, since
-  // it is a Common Room member too) is what actually appends the message;
-  // this only clears the composer once the send is confirmed.
+  // a member of this room) is what actually appends the message; this only
+  // clears the composer once the send is confirmed.
   chatInput.value = "";
 }
 
@@ -1051,6 +1126,7 @@ function wireChat() {
   document.getElementById("chat-close")?.addEventListener("click", () => openChat(false));
   chatForm?.addEventListener("submit", (e) => {
     e.preventDefault();
+    if (!canPostToCurrentRoom()) return;
     const text = chatInput.value.trim();
     if (!text) return;
     submitChatMessage(text);

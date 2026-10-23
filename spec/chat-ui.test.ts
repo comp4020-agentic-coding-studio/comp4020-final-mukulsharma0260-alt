@@ -10,9 +10,9 @@ import { expect, inject, it } from "vitest";
 const baseUrl = inject("baseUrl");
 const skyJs = readFileSync(new URL("../public/sky.js", import.meta.url), "utf8");
 
-async function open(opts: { fetchImpl?: (url: string, init?: { method?: string; body?: string }) => Promise<unknown> } = {}) {
+async function open(opts: { fetchImpl?: (url: string, init?: { method?: string; body?: string }) => Promise<unknown>; hash?: string } = {}) {
   const html = await (await fetch(new URL("/", baseUrl), {})).text();
-  const dom = new JSDOM(html, { url: baseUrl, runScripts: "outside-only" });
+  const dom = new JSDOM(html, { url: new URL(opts.hash ?? "", baseUrl).toString(), runScripts: "outside-only" });
   const { window } = dom;
   window.localStorage.setItem("overlap-arrival-v2", "entered");
   window.localStorage.setItem("overlap-film-seen", "1");
@@ -186,6 +186,109 @@ it("submitting sends room=common and a bounded idempotency key, and never a clie
     expect(sent.idempotencyKey.length).toBeGreaterThan(0);
     expect(sent.idempotencyKey.length).toBeLessThanOrEqual(64);
     expect(sent).not.toHaveProperty("callsign");
+  } finally {
+    p.close();
+  }
+});
+
+// ---- Phase 3: a room-aware drawer -----------------------------------------
+
+it("opening a constellation's view shows that room's own conversation title", async () => {
+  const p = await open({ hash: "#engineering" });
+  try {
+    const toggle = p.doc.getElementById("chat-toggle") as HTMLButtonElement;
+    toggle.click();
+    expect(p.doc.getElementById("chat-title")?.textContent).toBe("Engineering conversation");
+  } finally {
+    p.close();
+  }
+});
+
+it("an unsettled visitor sees an honest message instead of a usable composer in a constellation's view", async () => {
+  const p = await open({ hash: "#engineering" });
+  try {
+    p.doc.body.dataset.hasCallsign = "true";
+    p.doc.body.dataset.callsign = "visitor-x";
+    p.doc.body.dataset.constellation = ""; // not settled anywhere
+    const toggle = p.doc.getElementById("chat-toggle") as HTMLButtonElement;
+    toggle.click();
+    const input = p.doc.getElementById("chat-input") as HTMLTextAreaElement;
+    const submit = p.doc.querySelector("#chat-form button[type=submit]") as HTMLButtonElement;
+    expect(input.disabled).toBe(true);
+    expect(submit.disabled).toBe(true);
+    expect(text(p.doc.getElementById("chat-note"))).toMatch(/settle your star in engineering/i);
+  } finally {
+    p.close();
+  }
+});
+
+it("a visitor settled in Engineering sees an enabled composer there, and a disabled one in Science", async () => {
+  const p = await open({ hash: "#engineering" });
+  try {
+    p.doc.body.dataset.hasCallsign = "true";
+    p.doc.body.dataset.callsign = "engineer-x";
+    p.doc.body.dataset.constellation = "engineering";
+    const toggle = p.doc.getElementById("chat-toggle") as HTMLButtonElement;
+    toggle.click();
+    const input = p.doc.getElementById("chat-input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+
+    // Switching views in place (no navigation) must re-gate the composer.
+    p.window.eval('setView("science")');
+    expect(input.disabled).toBe(true);
+    expect(text(p.doc.getElementById("chat-note"))).toMatch(/settle your star in science/i);
+  } finally {
+    p.close();
+  }
+});
+
+it("each room keeps its own message history: switching views shows only that room's messages", async () => {
+  const p = await open({ hash: "#engineering" });
+  try {
+    p.doc.body.dataset.hasCallsign = "true";
+    p.doc.body.dataset.callsign = "watcher-x";
+    p.doc.body.dataset.constellation = "engineering";
+    p.listeners["sync"]?.({
+      data: JSON.stringify({
+        stars: [],
+        liveStarIds: [],
+        chat: [
+          { room: "common", messages: [{ id: "c1", callsign: "a", body: "common message", createdAt: new Date().toISOString() }] },
+          { room: "engineering", messages: [{ id: "e1", callsign: "b", body: "engineering message", createdAt: new Date().toISOString() }] },
+        ],
+      }),
+    });
+    const toggle = p.doc.getElementById("chat-toggle") as HTMLButtonElement;
+    toggle.click();
+    // Currently viewing Engineering: only its message is shown.
+    expect(text(p.doc.getElementById("chat-messages"))).toContain("engineering message");
+    expect(text(p.doc.getElementById("chat-messages"))).not.toContain("common message");
+
+    p.window.eval('setView(null)'); // back to the Common Room
+    expect(text(p.doc.getElementById("chat-messages"))).toContain("common message");
+    expect(text(p.doc.getElementById("chat-messages"))).not.toContain("engineering message");
+  } finally {
+    p.close();
+  }
+});
+
+it("a message.created event for a room other than the one currently shown is stored but not rendered until that room is viewed", async () => {
+  const p = await open({ hash: "#engineering" });
+  try {
+    p.doc.body.dataset.hasCallsign = "true";
+    p.doc.body.dataset.callsign = "watcher-y";
+    p.doc.body.dataset.constellation = "engineering";
+    p.listeners["sync"]?.({ data: JSON.stringify({ stars: [], liveStarIds: [], chat: [{ room: "common", messages: [] }, { room: "engineering", messages: [] }] }) });
+    const toggle = p.doc.getElementById("chat-toggle") as HTMLButtonElement;
+    toggle.click();
+
+    p.listeners["message.created"]?.({
+      data: JSON.stringify({ v: 1, room: "common", message: { id: "c2", callsign: "someone", body: "a common room message", createdAt: new Date().toISOString() } }),
+    });
+    expect(text(p.doc.getElementById("chat-messages"))).not.toContain("a common room message");
+
+    p.window.eval('setView(null)');
+    expect(text(p.doc.getElementById("chat-messages"))).toContain("a common room message");
   } finally {
     p.close();
   }
