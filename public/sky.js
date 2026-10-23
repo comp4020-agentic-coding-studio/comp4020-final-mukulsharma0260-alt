@@ -619,6 +619,10 @@ function startRealtime() {
     const { room, message } = JSON.parse(event.data);
     receiveChatMessage(room, message);
   });
+  realtime.addEventListener("message.expired", (event) => {
+    const { room, ids } = JSON.parse(event.data);
+    removeChatMessages(room, ids ?? []);
+  });
   realtime.addEventListener("error", () => {
     setText("live-line", "Reconnecting to the lounge…");
   });
@@ -999,6 +1003,7 @@ function chatTime(iso) {
 function renderChatMessage(message) {
   const li = document.createElement("li");
   li.className = "chat-message";
+  li.dataset.messageId = message.id;
   const own = message.callsign === document.body.dataset.callsign;
   li.dataset.own = String(own);
 
@@ -1033,6 +1038,21 @@ function receiveChatMessage(room, message) {
   if (room === currentChatRoom() && chatMessages) {
     chatMessages.append(renderChatMessage(message));
     chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+}
+
+// Drops expired messages from this room's stored history, and from the
+// visible list too if this room is the one currently shown — an open chat
+// panel loses them live, rather than showing stale text until a reload.
+function removeChatMessages(room, ids) {
+  const idSet = new Set(ids);
+  const list = chatMessagesByRoom.get(room);
+  if (list) chatMessagesByRoom.set(room, list.filter((m) => !idSet.has(m.id)));
+  const seen = chatSeenIdsByRoom.get(room);
+  if (seen) for (const id of ids) seen.delete(id);
+  if (room !== currentChatRoom() || !chatMessages) return;
+  for (const id of ids) {
+    chatMessages.querySelector(`[data-message-id="${CSS.escape(id)}"]`)?.remove();
   }
 }
 

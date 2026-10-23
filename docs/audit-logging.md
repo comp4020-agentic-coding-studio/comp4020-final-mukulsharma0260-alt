@@ -24,11 +24,12 @@ browser is looking at.
 | `state.broadcast` | the changed star, or `anonymous` for counts or a chat message | `room`, `change`, `scope`, `recipients` | an update was sent |
 
 `change` is `star.created`, `star.moved`, `star.constellation`, `presence`
-(live counts), or `message.created` (a chat message). `scope` is `all` for
-star/presence broadcasts, since the Common Room shows every star; a chat
-broadcast is `scope=room`, since it is delivered only to the streams
-genuinely subscribed to that room (`src/chat-rooms.ts`'s `ChatRoomRegistry`),
-never to every open stream.
+(live counts), `message.created`, or `message.expired` (the periodic
+expiry sweep telling a room's connected visitors what it just deleted).
+`scope` is `all` for star/presence broadcasts, since the Common Room shows
+every star; a chat broadcast (created or expired) is `scope=room`, since it
+is delivered only to the streams genuinely subscribed to that room
+(`src/chat-rooms.ts`'s `ChatRoomRegistry`), never to every open stream.
 
 ## Chat (ADR 0012's follow-on)
 

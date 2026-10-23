@@ -14,6 +14,7 @@ import {
   CallsignTakenError,
   createMessage,
   createStar,
+  deleteExpiredMessages,
   getByHash,
   getById,
   getCallsignByHash,
@@ -45,6 +46,9 @@ import { BREAK_MODES, isBreakMode, type BreakMode } from "./break.ts";
 const PORT = Number(process.env.PORT ?? 8080);
 const DB_PATH = process.env.DB_PATH ?? "/data/stars.db";
 const IS_PROD = process.env.NODE_ENV === "production";
+// A test spawns its own server and needs the sweep to fire within a test's
+// own timeout, not wait a real minute; production always uses the default.
+const EXPIRY_SWEEP_INTERVAL_MS = Number(process.env.EXPIRY_SWEEP_INTERVAL_MS ?? 60_000);
 const MAX_BODY_BYTES = 10_000;
 
 // The arrival artwork, served from an explicit allowlist rather than a
@@ -264,6 +268,27 @@ function broadcastMessage(room: Room, event: string, body: unknown): void {
   const recipients = chatRooms.streamsFor(room, eventStreams);
   for (const stream of recipients) sendEvent(stream, event, body);
   audit({ action: "state.broadcast", actor: ANONYMOUS, room, change: event, scope: "room", recipients: recipients.length, result: "sent" });
+}
+
+// Deletes every message past its expiry and tells each affected room's
+// currently-connected visitors live, so an open chat panel drops them
+// rather than showing stale text until the next reload. Grouped by room so
+// a sweep spanning several rooms sends one message.expired per room, not
+// one per message. listRoomMessages's own filter already makes an expired
+// message unreadable before this ever runs (see src/db.ts); this only
+// frees storage and keeps connected visitors honestly up to date.
+function sweepExpiredMessages(): void {
+  const deleted = deleteExpiredMessages(db, new Date().toISOString());
+  if (deleted.length === 0) return;
+  const idsByRoom = new Map<Room, string[]>();
+  for (const { id, room } of deleted) {
+    const ids = idsByRoom.get(room) ?? [];
+    ids.push(id);
+    idsByRoom.set(room, ids);
+  }
+  for (const [room, ids] of idsByRoom) {
+    broadcastMessage(room, "message.expired", { v: 1, room, ids });
+  }
 }
 
 // A refused request, logged with why and never with what it carried.
@@ -885,6 +910,12 @@ setInterval(() => {
   messageRateLimiter.sweep(now);
   messageIdempotency.sweep(now);
 }, 60_000);
+
+// Separate from the sweep above: a different store (SQLite, not memory) and
+// a different purpose (freeing storage and notifying connected visitors,
+// not bounding a map). Expiry itself is already enforced on every read
+// regardless of this interval; this only catches up storage and live state.
+setInterval(sweepExpiredMessages, EXPIRY_SWEEP_INTERVAL_MS);
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`listening on 0.0.0.0:${PORT}, db at ${DB_PATH}`);
