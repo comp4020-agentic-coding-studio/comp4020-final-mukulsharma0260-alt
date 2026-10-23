@@ -551,14 +551,13 @@ async function handleSetCallsign(req: IncomingMessage, res: ServerResponse): Pro
   });
 }
 
-// Posts a chat message. Phase 2 accepts only "common": a non-common room key
-// is a valid Room (isRoomKey passes it) but is refused here with its own
-// reason, since nothing else yet exists to deliver it to (Phase 3 lifts
-// this). Posting needs a callsign but never a star — Common Room membership
-// is "any entered visitor", not "a settled star" (that rule is Phase 3's,
-// for subject rooms only). The callsign in the stored/broadcast message is
-// always the server's own lookup; a callsign field in the request body, if
-// sent, is never read.
+// Posts a chat message. Common Room needs only a callsign — any entered
+// visitor, star or not. A constellation's conversation needs both a
+// callsign and the poster's own star genuinely settled there right now
+// (never a client-asserted "I am looking at this room"): there is no
+// read-only or preview posting state. The callsign in the stored/broadcast
+// message is always the server's own lookup; a callsign field in the
+// request body, if sent, is never read.
 async function handleCreateMessage(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const token = tokenFromRequest(req);
   if (!token) {
@@ -587,14 +586,13 @@ async function handleCreateMessage(req: IncomingMessage, res: ServerResponse): P
     sendJson(res, 400, { error: "room must be a valid room key" });
     return;
   }
-  if (b.room !== "common") {
-    // Not yet reachable through the UI; refused explicitly rather than
-    // silently accepted and never delivered anywhere.
-    deny("message.denied", undefined, "room_not_available");
-    sendJson(res, 400, { error: "that room does not accept messages yet" });
+  const room = b.room;
+  const star = getByHash(db, tokenHash);
+  if (room !== "common" && star?.constellation !== room) {
+    deny("message.denied", undefined, "not_settled");
+    sendJson(res, 400, { error: `settle your star in ${room} to join this conversation` });
     return;
   }
-  const room = b.room;
 
   if (!isValidIdempotencyKey(b.idempotencyKey)) {
     deny("message.denied", undefined, "invalid_idempotency_key");
@@ -634,7 +632,6 @@ async function handleCreateMessage(req: IncomingMessage, res: ServerResponse): P
   const message = createMessage(db, { id, room, tokenHash, callsignSnapshot: callsign.callsign, body: text, now: nowIso, expiresAt });
   messageIdempotency.record(tokenHash, idempotencyKey, id, now);
 
-  const star = getByHash(db, tokenHash);
   sendJson(res, 201, { message: publicMessage(message) });
   audit({
     action: "message.created",

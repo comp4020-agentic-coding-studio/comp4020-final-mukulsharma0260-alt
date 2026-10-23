@@ -64,7 +64,7 @@ Every refusal is `result=rejected` with a `reason`; the body is never logged.
 | `star.constellation_denied` | `anonymous` or own star | `no_owned_star`, `invalid_json`, `invalid_constellation` |
 | `break.listening_denied` | `anonymous` or own star | `no_owned_star`, `invalid_json`, `invalid_mode`, `not_glowing` |
 | `callsign.denied` | `anonymous` or own star | `invalid_json`, `invalid_format`, `reserved`, `taken`, `cooldown` |
-| `message.denied` | `anonymous` or own star | `no_identity`, `no_callsign`, `invalid_json`, `invalid_room`, `room_not_available`, `invalid_idempotency_key`, `invalid_body`, `invalid_length`, `rate_limited` |
+| `message.denied` | `anonymous` or own star | `no_identity`, `no_callsign`, `invalid_json`, `invalid_room`, `not_settled`, `invalid_idempotency_key`, `invalid_body`, `invalid_length`, `rate_limited` |
 | `request.denied` | `anonymous` | `cross_origin` |
 
 A star id sent in a request body is never trusted, so it is never named as a
