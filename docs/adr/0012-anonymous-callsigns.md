@@ -2,7 +2,7 @@
 
 A visitor may choose an anonymous callsign, independent of any star
 
-# Status: Accepted (amended: Common Room chat; amended again: subject-room chat)
+# Status: Accepted (amended: Common Room chat; amended again: subject-room chat; amended again: expiry enforcement)
 
 # Context
 
@@ -284,3 +284,50 @@ transport, no new schema.
   immediately, including on an already-open stream.
 - `docs/audit-logging.md`'s `message.denied` reasons gain `not_settled` and
   drop the now-unreachable `room_not_available`.
+
+# Amendment: expiry enforcement (the two remaining guarantees)
+
+The Common Room amendment already made exclusion from every read path
+structural (`listRoomMessages`'s `expires_at > ?` filter), so an expired
+message was never readable even before this amendment. The two guarantees
+explicitly deferred at the time — eventual deletion, and telling connected
+visitors live — are built now.
+
+- **`deleteExpiredMessages(db, nowIso)`** (`src/db.ts`) deletes every row
+  past its expiry and reports exactly which ids, grouped by room, so the
+  server knows what to announce without a second query. It is the only
+  thing that frees storage; the read-path filter already made those rows
+  unreadable regardless of whether or when this runs.
+- **A dedicated sweep**, `setInterval(sweepExpiredMessages,
+  EXPIRY_SWEEP_INTERVAL_MS)`, separate from the existing rate-limiter/
+  idempotency sweep: a different store (SQLite, not an in-memory map) and a
+  different purpose. `EXPIRY_SWEEP_INTERVAL_MS` defaults to 60 seconds in
+  production, overridable by environment variable — the same convention
+  `PORT`/`DB_PATH` already use — so a test can make the sweep fire within
+  its own timeout instead of waiting a real minute.
+- **`message.expired { v: 1, room, ids }`**, broadcast once per affected
+  room through the existing `broadcastMessage` (room-scoped, never
+  `scope=all`), whenever a sweep tick actually deletes something for that
+  room. The client (`public/sky.js`) drops those ids from both its stored
+  per-room history and, if that room is the one currently shown, the
+  visible list — a message disappears live, not only on the next reload.
+- **Tested directly** (`spec/chat-expiry.test.ts`): an already-expired
+  message is seeded straight into the database file (bypassing the API,
+  which can only ever create a message with a fresh 24-hour expiry) to
+  prove deletion and the live event independently of waiting a real 24
+  hours; a third test seeds an expired message *before the server starts*
+  and asserts it is absent from the very first `sync` snapshot, proving
+  expiry survives a restart. Demonstrated red/green: disabling the sweep
+  interval makes the deletion and live-event tests fail immediately, while
+  the restart-survival test (which exercises only the read-path filter)
+  keeps passing — confirming the two guarantees are genuinely independent,
+  not accidentally coupled.
+
+## Consequences (expiry enforcement)
+
+- A sweep tick that finds nothing to delete sends no broadcast and touches
+  no stream — connected visitors are never told about an empty sweep.
+- The sweep interval is a storage/freshness knob only: no correctness or
+  privacy property depends on how often it runs, including the degenerate
+  case of it never running (the read-path filter alone is already
+  sufficient for guarantee 1).
