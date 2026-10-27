@@ -8,8 +8,9 @@ Reading order: each amendment below supersedes the rule wording before it.
 The current free-text rule is in CLAUDE.md (a callsign and a 1-280
 character message body, in the Common Room and in constellations). As of
 27 October 2026 the expiry-enforcement amendment (the deletion sweep and
-`message.expired`) is committed locally but not yet deployed; production
-already hides expired messages through the read-path filter.
+`message.expired`) is deployed. Fly stops the machine when idle and the
+sweep runs only while it is awake, so deletion can lag behind expiry; the
+read-path filter means an expired message is never returned meanwhile.
 
 # Context
 
