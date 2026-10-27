@@ -1,4 +1,4 @@
-# Recommendation: anonymous subject chat (not built)
+# Recommendation: anonymous subject chat (since built, in part)
 
 Status: built. Both Common Room chat and subject (per-constellation) chat —
 this proposal's original scope — now ship, under ADR 0012's two amendments.
@@ -14,6 +14,9 @@ expiry, SSE-filtered delivery, the audit vocabulary) were carried forward
 into Common Room chat as built, and still apply to subject chat once it
 ships: filtered delivery is already implemented generically
 (`src/chat-rooms.ts`), reusable for a second room without rework.
+
+Not built from this proposal: a profanity or slur filter, a report path,
+and owner removal of messages. There is no moderation in this version.
 
 ## Recommendation
 

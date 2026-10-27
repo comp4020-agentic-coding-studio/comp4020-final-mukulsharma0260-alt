@@ -2,6 +2,9 @@
 
 Short notes for PROCESS.md, to be merged once the work is approved.
 
+Status (27 October 2026): superseded. The parts still relevant are merged
+into PROCESS.md; "chat was not built" below is no longer true (ADR 0012).
+
 - The simulated Observatory prototype answered "does this layout read?" but
   had nothing behind it. It was deleted rather than wired up, so no route
   can show invented numbers.
