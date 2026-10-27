@@ -24,11 +24,12 @@ type Audio = { created: number; resumed: number; suspended: number; closed: numb
 
 async function loadFilm(opts: {
   storage?: Record<string, string>;
+  cookie?: string;
   reducedMotion?: boolean;
   connection?: { saveData?: boolean; effectiveType?: string };
   random?: number;
 } = {}) {
-  const res = await fetch(new URL("/", baseUrl));
+  const res = await fetch(new URL("/", baseUrl), { headers: opts.cookie ? { Cookie: opts.cookie } : {} });
   const dom = new JSDOM(await res.text(), { url: baseUrl, runScripts: "outside-only", pretendToBeVisual: true });
   const { window } = dom;
   for (const [k, v] of Object.entries(opts.storage ?? {})) window.localStorage.setItem(k, v);
@@ -117,6 +118,7 @@ async function loadFilm(opts: {
     enter: () => $("arrival-submit")!.dispatchEvent(new window.MouseEvent("click", { bubbles: true })),
     key: (key: string) => doc.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true })),
     skip: () => $("film-skip")!.dispatchEvent(new window.MouseEvent("click", { bubbles: true })),
+    replay: () => $("replay-arrival")!.dispatchEvent(new window.MouseEvent("click", { bubbles: true })),
     filmShown: () => doc.body.classList.contains("filming"),
     entered: () => doc.body.classList.contains("entered"),
     line: () => ($("film-line")?.textContent ?? "").trim(),
@@ -216,6 +218,88 @@ it("a second entry skips the film", async () => {
     expect(again.entered()).toBe(true);
   } finally {
     again.close();
+  }
+});
+
+// A returning browser goes straight into the lounge, so the lounge offers
+// the way back: the arrival screen, then the whole film again, on request.
+const RETURNING = { "overlap-arrival-v2": "entered", "overlap-film-seen": "1" };
+
+it("a returning visitor can replay the arrival and its film, then return with the same identity", async () => {
+  const created = await fetch(new URL("/api/star", baseUrl), { method: "POST", body: "{}" });
+  const cookie = created.headers.get("set-cookie")!.split(";")[0]!;
+  const starId = ((await created.json()) as { star: { id: string } }).star.id;
+  const f = await loadFilm({ storage: RETURNING, cookie });
+  try {
+    expect(f.entered()).toBe(true);
+    expect(f.streamsOpen()).toBe(1);
+    const checkIns = f.posts.length;
+
+    f.replay();
+    expect(f.entered()).toBe(false);
+    expect(f.filmShown()).toBe(false);
+    expect(f.streamsOpen()).toBe(0);
+    expect(f.doc.getElementById("arrival")?.getAttribute("aria-hidden")).not.toBe("true");
+    expect(f.doc.getElementById("sky-app")?.getAttribute("aria-hidden")).toBe("true");
+    expect(f.doc.activeElement).toBe(f.doc.getElementById("arrival-submit"));
+    // The arrival screen is only a picture: no stream, no check-in.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(f.streamsOpen()).toBe(0);
+    expect(f.posts).toHaveLength(checkIns);
+
+    // Enter plays the full film again, even though it was seen before.
+    f.enter();
+    expect(f.filmShown()).toBe(true);
+    expect(f.streamsOpen()).toBe(0);
+    expect(f.posts).toHaveLength(checkIns);
+
+    f.skip();
+    expect(f.entered()).toBe(true);
+    expect(f.streamsOpen()).toBe(1);
+    // Only check-ins were ever sent: nothing created, renamed or reset.
+    expect(f.posts.length).toBeGreaterThan(checkIns);
+    expect(new Set(f.posts)).toEqual(new Set(["/api/here"]));
+    expect(f.window.localStorage.getItem("overlap-arrival-v2")).toBe("entered");
+    expect(f.window.localStorage.getItem("overlap-film-seen")).toBe("1");
+    expect(f.doc.body.dataset.ownStar).toBe(starId);
+  } finally {
+    f.close();
+  }
+  // The server still recognises the same browser as the same star.
+  const page = await (await fetch(new URL("/", baseUrl), { headers: { Cookie: cookie } })).text();
+  expect(page).toContain(`data-own-star="${starId}"`);
+});
+
+it("the replay control is a keyboard-reachable button in the lounge, labelled Replay arrival experience", async () => {
+  const f = await loadFilm({ storage: RETURNING });
+  try {
+    const button = f.doc.getElementById("replay-arrival") as HTMLButtonElement | null;
+    expect(button?.tagName).toBe("BUTTON");
+    expect(button?.type).toBe("button");
+    expect(button?.hidden).toBe(false);
+    expect(button?.tabIndex).toBeGreaterThanOrEqual(0);
+    expect(button?.getAttribute("aria-label")).toBe("Replay arrival experience");
+    // The visible words are part of its accessible name.
+    expect(button?.textContent?.replace(/\s+/g, " ").trim()).toBe("Replay arrival");
+    expect(button?.closest(".topbar")).not.toBeNull();
+    expect(button?.closest("#arrival")).toBeNull();
+  } finally {
+    f.close();
+  }
+});
+
+it("under reduced motion a replay shows the arrival, then Enter goes straight back with no film or music", async () => {
+  const f = await loadFilm({ storage: RETURNING, reducedMotion: true });
+  try {
+    f.replay();
+    expect(f.entered()).toBe(false);
+    f.enter();
+    expect(f.filmShown()).toBe(false);
+    expect(f.entered()).toBe(true);
+    expect(f.audio.created).toBe(0);
+    expect(f.gets.filter((u) => u.includes(MUSIC))).toHaveLength(0);
+  } finally {
+    f.close();
   }
 });
 

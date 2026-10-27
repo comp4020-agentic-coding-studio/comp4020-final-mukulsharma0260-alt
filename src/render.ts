@@ -535,6 +535,9 @@ export function renderHomePage(
   #film-sound { top: max(1rem, env(safe-area-inset-top)); right: max(1rem, env(safe-area-inset-right)); }
   #film-skip { bottom: max(1rem, env(safe-area-inset-bottom)); right: max(1rem, env(safe-area-inset-right)); }
   body.entered #arrival { visibility: hidden; opacity: 0; pointer-events: none; }
+  /* Replaying the arrival from the lounge: it becomes visible at once, so
+     ENTER can take focus straight away, and still fades in. */
+  body.replaying #arrival { transition: opacity 600ms ease, visibility 0s; }
   body:not(.entered) #sky-app { visibility: hidden; opacity: 0; transform: scale(0.985); }
   #sky-app { transition: opacity 600ms ease, transform 600ms ease; }
   body.entered #sky-app { visibility: visible; opacity: 1; transform: scale(1); }
@@ -696,6 +699,7 @@ export function renderHomePage(
   .tool-icon { width: 1.05rem; height: 1.05rem; fill: currentColor; }
   .about-link { color: var(--color-ink-muted); font-size: var(--text-sm); text-decoration: none; padding: var(--space-2); min-height: var(--target); display: inline-flex; align-items: center; }
   .about-link:hover { color: var(--color-ink); text-decoration: underline; }
+  .about-link .tool-icon { display: none; }
 
   /* ---- The stage: real stars, full-screen ------------------------------
      Everything drawn here is clipped to the stage, so nothing on it can
@@ -834,11 +838,14 @@ export function renderHomePage(
   #dock-note { color: var(--color-ink-muted); font-size: var(--text-sm); line-height: 1.45; }
   #since { color: var(--color-ink-muted); font-size: var(--text-xs); }
   .dock-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  /* Announcements sit at the top of the star field, clear of the title
+     column and the dock, so they never cover the live line. */
   #status {
     position: absolute;
-    left: 0;
-    right: 0;
-    bottom: calc(100% + var(--space-3));
+    z-index: 4;
+    top: calc(var(--topbar-h) + var(--space-2));
+    left: calc(var(--gutter) + var(--column) + var(--space-5));
+    right: var(--gutter);
     text-align: center;
     color: var(--color-ink-soft);
     font-size: var(--text-sm);
@@ -1041,15 +1048,45 @@ export function renderHomePage(
   #break-now { margin-top: var(--space-2) !important; color: var(--color-ink); font-size: var(--text-sm); }
   .break-credit { margin-top: var(--space-3) !important; color: var(--color-ink-muted); font-size: var(--text-xs); line-height: 1.45; }
 
-  /* ---- Narrow and portrait screens ------------------------------------
-     The title sits on top, the navigation scrolls sideways under the
-     wordmark, and the dock becomes a bottom sheet. */
-  @media (max-width: 960px), (max-aspect-ratio: 1/1) {
+  /* ---- A top bar in two rows ----------------------------------------
+     One row holds the wordmark, all six views and the tools only from
+     1440px. Below that the wordmark and tools share the first row and the
+     views get a second, scrolling sideways when they do not fit, so none is
+     ever hidden or overlapped. The replay control drops its words there and
+     is named by its aria-label. */
+  @media (max-width: 1439px), (max-aspect-ratio: 1/1) {
     #sky-app { --topbar-h: 6.25rem; }
     .topbar { flex-wrap: wrap; align-content: center; row-gap: 0; column-gap: var(--space-3); }
     .lounge-nav { order: 3; flex: 1 0 100%; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); }
     .lounge-nav::-webkit-scrollbar { display: none; }
     .tools { order: 2; }
+    #replay-arrival { padding: 0; justify-content: center; }
+    #replay-arrival .tool-label { display: none; }
+  }
+  /* The second row costs the title its space above, so on wide but not
+     very wide screens the title moves up to the bar. */
+  @media (min-width: 961px) and (max-width: 1439px) and (min-aspect-ratio: 1/1) {
+    #sky-app .hero { top: calc(var(--topbar-h) + var(--space-2)); }
+  }
+  /* On short laptop screens the title and the dock both tighten, so the
+     live line is never hidden behind the dock. The privacy hint stays; the
+     date the star was first placed gives way. */
+  @media (min-width: 961px) and (max-height: 860px) and (min-aspect-ratio: 1/1) {
+    #sky-app { --text-display: clamp(1.9rem, 3vw, 2.6rem); }
+    #view-line { margin-top: var(--space-2) !important; font-size: var(--text-sm); }
+    #live-line { margin-top: var(--space-2) !important; }
+    .dock { padding: var(--space-3) var(--space-4) var(--space-2); }
+    .dock-row { gap: var(--space-2); }
+    .legend { margin-top: var(--space-2); padding-top: var(--space-2); }
+    #since { display: none; }
+  }
+
+  /* ---- Narrow and portrait screens ------------------------------------
+     The title sits on top and the dock becomes a bottom sheet. */
+  @media (max-width: 960px), (max-aspect-ratio: 1/1) {
+    /* The title spans the screen here, so announcements sit in the field
+       below it rather than beside it. */
+    #status { top: 38%; left: var(--gutter); right: var(--gutter); }
     .hero { top: calc(var(--topbar-h) + var(--space-4)); width: min(34rem, calc(100% - 2 * var(--gutter))); }
     .dock { left: 0; right: 0; bottom: 0; width: auto; border-width: 1px 0 0; border-radius: var(--radius-2) var(--radius-2) 0 0; padding: var(--space-3) var(--gutter) calc(var(--space-3) + env(safe-area-inset-bottom)); }
     .dock-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
@@ -1063,8 +1100,15 @@ export function renderHomePage(
     .wordmark-sub { font-size: 0.6875rem; letter-spacing: 0.1em; }
     .legend-toggle { margin-left: 0; }
     .chip-button { min-height: 2.25rem; }
-    .tool-label, .about-link { display: none; }
+    .tool-label, .about-label { display: none; }
     .tool-button { padding: 0; justify-content: center; }
+    /* About stays reachable on a phone, as an icon among the tools. */
+    .about-link { justify-content: center; min-width: var(--target); padding: 0; border: 1px solid var(--color-line); border-radius: var(--radius-pill); background: rgba(10, 12, 30, 0.45); color: var(--color-ink-soft); }
+    .about-link .tool-icon { display: block; }
+    /* The wordmark and the three tools must share one row, so the tagline,
+       which only repeats the arrival's, gives way. */
+    .wordmark-sub { display: none; }
+    .tools { gap: var(--space-1); }
     .hero { top: calc(var(--topbar-h) + var(--space-3)); }
     #view-line { font-size: var(--text-sm); margin-top: var(--space-2) !important; }
     #live-line { margin-top: var(--space-2) !important; font-size: var(--text-xs); }
@@ -1139,7 +1183,11 @@ export function renderHomePage(
         <svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M96 44v112a28 28 0 1 1-16-25V70l112-26v96a28 28 0 1 1-16-25V64z"></path></svg>
         <span class="tool-label">Break</span>
       </button>
-      <a class="about-link" href="/readme/">About</a>
+      <button type="button" id="replay-arrival" class="tool-button" aria-label="Replay arrival experience">
+        <svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 40a80 80 0 1 1-75.4 53.3l22.6 8A56 56 0 1 0 120 64v28L72 52l48-40z"></path></svg>
+        <span class="tool-label">Replay arrival</span>
+      </button>
+      <a class="about-link" href="/readme/" aria-label="About Overlap"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 24a96 96 0 1 1 0 192 96 96 0 0 1 0-192zm0 24a72 72 0 1 0 0 144 72 72 0 0 0 0-144zm-12 60h24v64h-24zm12-40a14 14 0 1 1 0 28 14 14 0 0 1 0-28z"></path></svg><span class="about-label">About</span></a>
     </div>
   </header>
 
@@ -1165,8 +1213,9 @@ export function renderHomePage(
     <p id="live-line" role="status" aria-atomic="true"${glowingTotal ? "" : ` data-quiet=""`}>${liveLine}</p>
   </section>
 
+  <div id="status" role="status" aria-live="polite"></div>
+
   <section class="dock" aria-label="Your star">
-    <div id="status" role="status" aria-live="polite"></div>
     <div class="dock-row">
       <div class="dock-you">
         <p id="you-status"${ownStar ? "" : " hidden"}>${ownGlowing ? "Your star is glowing" : "Your star is connecting"}</p>

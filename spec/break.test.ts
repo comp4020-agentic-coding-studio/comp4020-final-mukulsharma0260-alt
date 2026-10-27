@@ -173,6 +173,34 @@ it("playing tells the server which mode, and stopping clears it", async () => {
   }
 });
 
+it("replaying the arrival stops Break and closes the drawers, so nobody on the arrival is counted as listening", async () => {
+  const res = await fetch(new URL("/api/star", baseUrl), { method: "POST", body: "{}" });
+  const cookie = res.headers.get("set-cookie")!.split(";")[0]!;
+  const posts: string[] = [];
+  const p = await open({
+    cookie,
+    fetch: async (url: string, init?: { body?: string }) => {
+      if (url === "/api/listening") posts.push(init!.body!);
+      return { ok: true, json: async () => ({ hasStar: true, newStarIds: [], newCount: 0 }) };
+    },
+  });
+  try {
+    (p.doc.getElementById("break-toggle") as HTMLButtonElement).click();
+    (p.doc.querySelector('.break-mode[data-mode="calm"]') as HTMLButtonElement).click();
+    (p.doc.getElementById("break-play") as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 20));
+    (p.doc.getElementById("replay-arrival") as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(posts).toEqual([JSON.stringify({ mode: "calm" }), JSON.stringify({ mode: null })]);
+    expect(p.doc.querySelector("audio")!.paused).toBe(true);
+    expect(p.doc.getElementById("break-panel")!.hidden).toBe(true);
+    expect(p.doc.getElementById("chat-panel")!.hidden).toBe(true);
+    expect(p.doc.body.classList.contains("entered")).toBe(false);
+  } finally {
+    p.close();
+  }
+});
+
 it("serves every Break track as audio/mpeg with byte ranges", async () => {
   for (const [, , src] of MODES) {
     const res = await fetch(new URL(src, baseUrl), { headers: { Range: "bytes=0-99" } });

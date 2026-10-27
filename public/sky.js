@@ -30,10 +30,35 @@ function saveCheckIn() {
   }
 }
 
+// The same test measureInsets uses for the stacked phone layout.
+function narrowScreen() {
+  return window.matchMedia?.("(max-width: 960px), (max-aspect-ratio: 1/1)")?.matches ?? false;
+}
+
+// A few messages are too long for one line on a phone, where the second line
+// would fall on the stars, so they have a shorter phone version.
+function phoneText(full, short) {
+  return narrowScreen() ? short : full;
+}
+
+// On a phone, announcements sit in the strip the star field always leaves
+// free just below the title (measureInsets), so they never cover a star, a
+// constellation's name or the dock. Wider screens place them with CSS alone.
+function placeStatus() {
+  if (!narrowScreen()) {
+    statusEl.style.removeProperty("top");
+    return;
+  }
+  const lines = [...document.querySelectorAll(".hero > *")].filter((el) => !el.hidden && el.getBoundingClientRect?.().height);
+  const bottom = Math.max(0, ...lines.map((el) => el.getBoundingClientRect().bottom));
+  if (bottom) statusEl.style.top = `${Math.round(bottom + 4)}px`;
+}
+
 function announce(text, { transient = true } = {}) {
   clearTimeout(statusTimer);
   statusEl.textContent = text;
   statusEl.classList.remove("error");
+  placeStatus();
   statusEl.classList.add("visible");
   if (transient) {
     statusTimer = setTimeout(() => {
@@ -45,6 +70,7 @@ function announce(text, { transient = true } = {}) {
 function announceError(text) {
   clearTimeout(statusTimer);
   statusEl.textContent = text;
+  placeStatus();
   statusEl.classList.add("visible", "error");
 }
 
@@ -540,7 +566,7 @@ async function chooseConstellation(body) {
       body: JSON.stringify(body),
     });
   } catch {
-    announceError("Could not reach the lounge. Check your connection and try again.");
+    announceError(phoneText("Could not reach the lounge. Check your connection and try again.", "Could not connect. Check your connection."));
     return false;
   }
   if (!res.ok) {
@@ -573,7 +599,7 @@ async function settleIn(area) {
 async function leaveConstellation() {
   const area = ownArea();
   if (await chooseConstellation({ leave: true })) {
-    announce(area ? `Your star left ${INFO[area]?.name}. It is in the Common Room.` : "Your star is in the Common Room.");
+    announce(area ? phoneText(`Your star left ${INFO[area]?.name}. It is in the Common Room.`, "Your star is back in the Common Room.") : "Your star is in the Common Room.");
     if (view !== "common") setView(null);
   }
 }
@@ -719,7 +745,7 @@ function saveMove(x, y) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     postMove(x, y).catch(() => {
-      announceError("Could not save your star's new position. Check your connection and try again.");
+      announceError(phoneText("Could not save your star's new position. Check your connection and try again.", "Could not save. Check your connection."));
     });
   }, 300);
 }
@@ -743,7 +769,7 @@ function setPicked(on) {
   picked = on;
   starNodes.get(ownId())?.classList.toggle("picked", on);
   stage?.classList.toggle("placing", on);
-  if (on) announce("Tap a place to move your star there. Press Escape to cancel.", { transient: false });
+  if (on) announce(phoneText("Tap a place to move your star there. Press Escape to cancel.", "Tap a place for your star. Esc cancels."), { transient: false });
 }
 
 // Can this visitor's star be shown in the current view?
@@ -786,7 +812,7 @@ function wireStage() {
     clearTimeout(saveTimer);
     postMove(star.x, star.y)
       .then(() => announce("Star moved."))
-      .catch(() => announceError("Could not save your star's new position. Check your connection and try again."));
+      .catch(() => announceError(phoneText("Could not save your star's new position. Check your connection and try again.", "Could not save. Check your connection.")));
   }
   stage.addEventListener("pointerup", endDrag);
   stage.addEventListener("pointercancel", () => endDrag());
@@ -806,7 +832,7 @@ function wireStage() {
     const p = moveOwnLocally(x, y);
     postMove(p.x, p.y)
       .then(() => announce("Star moved."))
-      .catch(() => announceError("Could not save your star's new position. Check your connection and try again."));
+      .catch(() => announceError(phoneText("Could not save your star's new position. Check your connection and try again.", "Could not save. Check your connection.")));
   });
 
   stage.addEventListener("keydown", (e) => {
@@ -858,7 +884,7 @@ async function placeStar(x, y, constellation) {
       body: JSON.stringify(payload),
     });
   } catch {
-    announceError("Could not place your star. Check your connection and try again.");
+    announceError(phoneText("Could not place your star. Check your connection and try again.", "Could not place star. Check your connection."));
     return false;
   }
   if (!res.ok) {
@@ -1178,7 +1204,7 @@ async function reportHere() {
       : data.newCount === 1
         ? "1 new star since."
         : `${data.newCount} new stars since.`;
-    announce(`Welcome back. ${sincePart} ${newPart}`.trim(), { transient: false });
+    announce(phoneText(`Welcome back. ${sincePart} ${newPart}`.trim(), `Welcome back. ${newPart}`), { transient: false });
   }
   for (const id of data.newStarIds ?? []) arrive(id);
 }
@@ -1398,6 +1424,9 @@ const filmSkip = document.getElementById("film-skip");
 const filmSound = document.getElementById("film-sound");
 
 let filming = false;
+// Set by "Replay arrival experience": the next Enter plays the whole film
+// again, even for a browser that has seen it.
+let replaying = false;
 let filmStartedAt = 0;
 let filmTimers = [];
 let filmAudio;
@@ -1599,8 +1628,34 @@ document.addEventListener("visibilitychange", () => {
 function enterLounge() {
   if (skyActive || filming) return;
   saveCheckIn();
-  if (filmAllowed()) playFilm();
+  const replay = replaying;
+  replaying = false;
+  if (filmAllowed() || (replay && filmEl && arrivalVideoAllowed())) playFilm();
   else activateSky();
+}
+
+// The lounge's way back to the arrival, for a returning browser that now
+// goes straight in. Nothing about the visitor is reset: the cookie, star,
+// callsign, conversations and remembered choices all stay. Leaving is the
+// same as hiding the tab: the stream closes, so the star stops glowing, and
+// Break stops so nobody on the arrival screen is counted as listening. The
+// arrival is only a picture again until Enter (ADR 0006).
+function replayArrival() {
+  if (!skyActive || filming) return;
+  openChat(false);
+  openBreak(false);
+  if (breakPlaying()) breakAudio.pause();
+  setPicked(false);
+  stopRealtime();
+  skyActive = false;
+  replaying = true;
+  stage?.classList.add("still");
+  document.body.classList.add("replaying");
+  document.body.classList.remove("entered");
+  document.getElementById("sky-app")?.setAttribute("aria-hidden", "true");
+  document.getElementById("arrival")?.removeAttribute("aria-hidden");
+  loadArrivalVideo();
+  arrivalButton?.focus();
 }
 
 
@@ -1608,6 +1663,7 @@ function activateSky({ remember = false } = {}) {
   if (skyActive) return;
   if (remember) saveCheckIn();
   skyActive = true;
+  document.body.classList.remove("replaying");
   stopArrivalVideo();
   document.body.classList.add("entered");
   document.getElementById("arrival")?.setAttribute("aria-hidden", "true");
@@ -1661,10 +1717,12 @@ function activateSky({ remember = false } = {}) {
     nextFrame(() => {
       resizePending = false;
       relayout();
+      placeStatus();
     });
   });
 
   arrivalButton?.addEventListener("click", enterLounge);
+  document.getElementById("replay-arrival")?.addEventListener("click", replayArrival);
   filmSkip?.addEventListener("click", endFilm);
   filmSound?.addEventListener("click", toggleSound);
   document.addEventListener("keydown", (e) => {
