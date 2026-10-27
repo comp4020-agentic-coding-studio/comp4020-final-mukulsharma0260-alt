@@ -14,7 +14,6 @@ async function open(opts: { fetchImpl?: (url: string, init?: { method?: string; 
   const html = await (await fetch(new URL("/", baseUrl), {})).text();
   const dom = new JSDOM(html, { url: new URL(opts.hash ?? "", baseUrl).toString(), runScripts: "outside-only" });
   const { window } = dom;
-  window.localStorage.setItem("overlap-arrival-v2", "entered");
   window.localStorage.setItem("overlap-film-seen", "1");
   const listeners: Record<string, (e: { data: string }) => void> = {};
   Object.assign(window, {
@@ -27,6 +26,8 @@ async function open(opts: { fetchImpl?: (url: string, init?: { method?: string; 
     fetch: opts.fetchImpl ?? (async () => ({ ok: true, json: async () => ({ hasStar: false }) })),
   });
   window.eval(skyJs);
+  // Every load starts on the arrival screen; these checks begin in the lounge.
+  window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   return { window, doc: window.document, listeners, close: () => window.close() };
 }
 

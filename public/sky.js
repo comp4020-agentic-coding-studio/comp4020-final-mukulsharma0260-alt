@@ -9,25 +9,13 @@ let statusTimer;
 let realtime;
 let skyActive = false;
 
-const ARRIVAL_KEY = "overlap-arrival-v2";
-
-function hasCheckedIn() {
-  try {
-    return window.localStorage.getItem(ARRIVAL_KEY) !== null;
-  } catch {
-    return false;
-  }
-}
-
-function saveCheckIn() {
-  try {
-    // Browser-only arrival state. It deliberately does not create an account,
-    // server identity, or visible name. A constellation is never kept here:
-    // it lives on the star, in SQLite.
-    window.localStorage.setItem(ARRIVAL_KEY, "entered");
-  } catch {
-    // A blocked localStorage must not prevent a visitor from using the lounge.
-  }
+// Every load starts on the arrival screen (ADR 0008). An earlier version
+// remembered "entered" here and skipped the arrival for returning browsers;
+// that flag is removed so no browser keeps skipping it.
+try {
+  window.localStorage.removeItem("overlap-arrival-v2");
+} catch {
+  // Blocked storage only means there was nothing to remove.
 }
 
 // The same test measureInsets uses for the stacked phone layout.
@@ -1422,11 +1410,9 @@ const filmBar = document.querySelector("#arrival-film .film-bar");
 const filmRemaining = document.getElementById("film-remaining");
 const filmSkip = document.getElementById("film-skip");
 const filmSound = document.getElementById("film-sound");
+const arrivalWatch = document.getElementById("arrival-watch");
 
 let filming = false;
-// Set by "Replay arrival experience": the next Enter plays the whole film
-// again, even for a browser that has seen it.
-let replaying = false;
 let filmStartedAt = 0;
 let filmTimers = [];
 let filmAudio;
@@ -1625,21 +1611,33 @@ document.addEventListener("visibilitychange", () => {
   else filmCloud?.play()?.catch(() => {});
 });
 
+// Enter plays the film on a browser's first visit, and goes straight into
+// the lounge on every later one (and always under reduced motion,
+// Save-Data or 2g).
 function enterLounge() {
   if (skyActive || filming) return;
-  saveCheckIn();
-  const replay = replaying;
-  replaying = false;
-  if (filmAllowed() || (replay && filmEl && arrivalVideoAllowed())) playFilm();
+  if (filmAllowed()) playFilm();
   else activateSky();
 }
 
-// The lounge's way back to the arrival, for a returning browser that now
-// goes straight in. Nothing about the visitor is reset: the cookie, star,
-// callsign, conversations and remembered choices all stay. Leaving is the
-// same as hiding the tab: the stream closes, so the star stops glowing, and
-// Break stops so nobody on the arrival screen is counted as listening. The
-// arrival is only a picture again until Enter (ADR 0006).
+// A returning browser can still watch the film, on request.
+function watchFilm() {
+  if (skyActive || filming || !filmEl || !arrivalVideoAllowed()) return;
+  playFilm();
+}
+
+// The film is offered on the arrival screen only to a browser that has seen
+// it and may play it; a first visit gets it from Enter instead.
+function updateWatchControl() {
+  if (arrivalWatch) arrivalWatch.hidden = !(filmEl && arrivalVideoAllowed() && readFlag(FILM_SEEN_KEY));
+}
+
+// The lounge's way back to the arrival screen. Nothing about the visitor is
+// reset: the cookie, star, callsign, conversations and remembered choices
+// all stay. Leaving is the same as hiding the tab: the stream closes, so the
+// star stops glowing, and Break stops so nobody on the arrival screen is
+// counted as listening. The arrival is only a picture again until Enter
+// (ADR 0006), where the film can be watched again.
 function replayArrival() {
   if (!skyActive || filming) return;
   openChat(false);
@@ -1648,20 +1646,19 @@ function replayArrival() {
   setPicked(false);
   stopRealtime();
   skyActive = false;
-  replaying = true;
   stage?.classList.add("still");
   document.body.classList.add("replaying");
   document.body.classList.remove("entered");
   document.getElementById("sky-app")?.setAttribute("aria-hidden", "true");
   document.getElementById("arrival")?.removeAttribute("aria-hidden");
+  updateWatchControl();
   loadArrivalVideo();
   arrivalButton?.focus();
 }
 
 
-function activateSky({ remember = false } = {}) {
+function activateSky() {
   if (skyActive) return;
-  if (remember) saveCheckIn();
   skyActive = true;
   document.body.classList.remove("replaying");
   stopArrivalVideo();
@@ -1722,6 +1719,7 @@ function activateSky({ remember = false } = {}) {
   });
 
   arrivalButton?.addEventListener("click", enterLounge);
+  arrivalWatch?.addEventListener("click", watchFilm);
   document.getElementById("replay-arrival")?.addEventListener("click", replayArrival);
   filmSkip?.addEventListener("click", endFilm);
   filmSound?.addEventListener("click", toggleSound);
@@ -1735,15 +1733,15 @@ function activateSky({ remember = false } = {}) {
       }
       return;
     }
-    if (e.key !== "Escape") return;
-    if (!skyActive) enterLounge();
-    else if (chatPanel && !chatPanel.hidden) openChat(false);
+    // On the arrival screen only Enter enters: Escape does nothing there.
+    if (e.key !== "Escape" || !skyActive) return;
+    if (chatPanel && !chatPanel.hidden) openChat(false);
     else if (breakPanel && !breakPanel.hidden) openBreak(false);
     else if (picked) setPicked(false);
   });
 
-  if (hasCheckedIn()) activateSky();
-  else arrivalButton?.focus();
+  updateWatchControl();
+  arrivalButton?.focus();
 
   if (document.readyState === "complete") loadArrivalVideo();
   else window.addEventListener("load", loadArrivalVideo, { once: true });

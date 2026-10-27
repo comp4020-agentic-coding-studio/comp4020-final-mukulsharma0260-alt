@@ -71,9 +71,12 @@ async function loadSky(opts: {
     },
   });
 
-  if (opts.checkedIn !== false) window.localStorage.setItem("overlap-arrival-v2", "{}");
-
+  // Most checks begin in the lounge, as a browser that has entered before:
+  // it has seen the film, so its Enter goes straight in. Every load still
+  // starts on the arrival screen, so they press Enter themselves.
+  if (opts.checkedIn !== false) window.localStorage.setItem("overlap-film-seen", "1");
   window.eval(skyJs);
+  if (opts.checkedIn !== false) window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 
   return {
     window,
@@ -124,7 +127,7 @@ it("does not count an un-checked-in visitor as looking at the sky", async () => 
   }
 });
 
-it("uses a no-input anonymous arrival and lets Escape enter the sky", async () => {
+it("uses a no-input anonymous arrival that Escape does not enter", async () => {
   const sky = await loadSky({ checkedIn: false });
   try {
     const button = sky.window.document.getElementById("arrival-submit");
@@ -132,6 +135,8 @@ it("uses a no-input anonymous arrival and lets Escape enter the sky", async () =
     expect(sky.window.document.getElementById("signal-name")).toBeNull();
     expect(sky.open()).toHaveLength(0);
     sky.pressEscape();
+    expect(sky.open()).toHaveLength(0);
+    sky.checkIn();
     expect(sky.open().map((s) => s.url)).toEqual(["/events"]);
   } finally {
     sky.close();

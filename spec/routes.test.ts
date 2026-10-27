@@ -22,7 +22,6 @@ async function open(hash: string, cookie?: string) {
   const html = await (await fetch(new URL("/", baseUrl), { headers: cookie ? { Cookie: cookie } : {} })).text();
   const dom = new JSDOM(html, { url: new URL(hash, baseUrl).toString(), runScripts: "outside-only" });
   const { window } = dom;
-  window.localStorage.setItem("overlap-arrival-v2", "entered");
   window.localStorage.setItem("overlap-film-seen", "1");
   const listeners: Record<string, (e: { data: string }) => void> = {};
   Object.assign(window, {
@@ -40,6 +39,8 @@ async function open(hash: string, cookie?: string) {
   const errors: unknown[] = [];
   window.addEventListener("error", (e) => errors.push(e.error ?? e.message));
   window.eval(skyJs);
+  // Every load starts on the arrival screen; these checks begin in the lounge.
+  window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   return { window, doc: window.document, html, listeners, errors };
 }
 

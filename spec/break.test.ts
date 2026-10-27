@@ -20,7 +20,6 @@ async function open(opts: { cookie?: string; fetch?: (url: string, init?: { body
   const html = await (await fetch(new URL("/", baseUrl), { headers: opts.cookie ? { Cookie: opts.cookie } : {} })).text();
   const dom = new JSDOM(html, { url: baseUrl, runScripts: "outside-only" });
   const { window } = dom;
-  window.localStorage.setItem("overlap-arrival-v2", "entered");
   window.localStorage.setItem("overlap-film-seen", "1");
   const listeners: Record<string, (e: { data: string }) => void> = {};
   const media = { plays: [] as string[], pauses: 0 };
@@ -46,6 +45,8 @@ async function open(opts: { cookie?: string; fetch?: (url: string, init?: { body
     this.dispatchEvent(new window.Event("pause"));
   };
   window.eval(skyJs);
+  // Every load starts on the arrival screen; these checks begin in the lounge.
+  window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   return { window, doc: window.document, listeners, media, close: () => window.close() };
 }
 
