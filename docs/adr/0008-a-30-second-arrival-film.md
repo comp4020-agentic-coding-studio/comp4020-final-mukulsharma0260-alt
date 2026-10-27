@@ -62,3 +62,14 @@ pad was replaced by the author's own track; lines now run in a fixed order.
 Media are credited in [docs/credits.md](../credits.md).
 - The film is remembered per browser, in localStorage. Clearing site data
   shows it again.
+
+Amended 27 October 2026: a browser that has entered before still goes
+straight into the lounge (the `overlap-arrival-v2` flag in localStorage),
+so the arrival was unreachable for returning visitors. The lounge's top
+bar now has a "Replay arrival experience" button. It leaves the lounge as
+hiding the tab would (the stream closes and the star stops glowing; Break
+stops), shows the arrival screen with focus on Enter, and Enter then plays
+the whole film again, skippable as before. Reduced motion, Save-Data and
+2g still get no film. Nothing about the visitor is reset: cookie, star,
+callsign and conversations all stay. The arrival still opens no stream and
+sends no check-in until Enter (ADR 0006).
