@@ -19,6 +19,13 @@ const { chromium } = require(process.env.PLAYWRIGHT ?? "playwright");
 const APP_URL = process.env.APP_URL ?? "http://localhost:8080";
 const MARKDOWN = process.argv.includes("--markdown");
 
+// The check places stars, which have no delete path, so it never runs
+// against anything but a local server.
+if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(new URL(APP_URL).hostname)) {
+  console.error(`check-mobile: refusing ${APP_URL}; it writes stars, and CLAUDE.md says live checks against production are read-only. Use a local throwaway server.`);
+  process.exit(1);
+}
+
 const SIZES: Array<[number, number]> = [
   [360, 844], [390, 844], [414, 896], [430, 932], [844, 390], [768, 1024], [1024, 768],
 ];
