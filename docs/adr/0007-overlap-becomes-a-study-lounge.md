@@ -2,7 +2,12 @@
 
 Overlap becomes a study lounge
 
-# Status: Accepted
+# Status: Accepted. Partly superseded by [ADR 0012](0012-anonymous-callsigns.md)
+
+Note (27 October 2026): "no names, no free text, no chat" below was true
+when this was written. ADR 0012 later added optional callsigns and
+short-lived Common Room and constellation conversations. The study-lounge
+decision itself stands.
 
 # Context
 

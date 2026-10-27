@@ -4,6 +4,13 @@ A star settles in one of five fixed constellations
 
 # Status: Accepted (amended twice: the Common Room is the default view; each constellation is its own view)
 
+Note (27 October 2026): "the app accepts no free text" and "no discussion
+or chat UI exists" below were true when this was written; ADR 0012 later
+added callsigns and conversations. The "more than 400 equal dots" were
+seen in a local development database filled mostly by automated tests and
+screenshot runs, not by hundreds of real visitors; production held about a
+dozen stars at the time. The legibility problem was real either way.
+
 # Context
 
 The lounge used to be one column of every star ever placed, more than 400

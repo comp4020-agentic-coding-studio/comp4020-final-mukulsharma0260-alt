@@ -4,6 +4,10 @@ Live means looking at the sky
 
 # Status: Accepted. Amended by ADR 0006.
 
+Note (27 October 2026): "the sky" here is the place's earlier name. Since
+[ADR 0007](0007-overlap-becomes-a-study-lounge.md) the place is the lounge;
+the decision about what live means is unchanged.
+
 Supersedes [ADR 0004](0004-live-means-an-open-sky-connection.md).
 
 # Context

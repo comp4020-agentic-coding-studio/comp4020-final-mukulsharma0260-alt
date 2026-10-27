@@ -4,6 +4,10 @@ Audit logs identify anonymous stars, not people
 
 # Status: Accepted (amended 19 October 2026: presence, snapshot, broadcast and every refusal are logged)
 
+Note (27 October 2026): "no names" below predates ADR 0012's optional
+callsigns. Callsigns and message bodies are never logged; the actor is
+still only a public star id or `anonymous` (see docs/audit-logging.md).
+
 # Context
 
 Overlap promises anonymity: a person is one browser, known to the server

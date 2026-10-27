@@ -6,8 +6,8 @@ Everything a visitor reads uses these words, and only in these senses.
   itself. Its top bar is the same in every view.
 - **Common Room**: the default view inside the lounge, one full-screen field
   where every real star is shown. It is where a visitor arrives after the
-  film. It is the one place called a room, and it is not a chat room or
-  channel.
+  film. It is the one place called a room. It has a conversation, but it is
+  never called a chat room or a channel.
 - **constellation**: one of five fixed, optional subject spaces inside the
   lounge (Science, Engineering, Business, Health, Arts & Society). Each has
   its own full-screen view, reached from the top bar, a doorway in the Common
@@ -34,6 +34,9 @@ Everything a visitor reads uses these words, and only in these senses.
   conversation is named the same way ("Engineering conversation"), never
   called a "chat room," so the existing rule that a constellation is never
   called a room still holds.
+- **Chat**: the top bar's label for the button that opens the conversation
+  drawer, and only that. The drawer itself names a conversation, never a
+  "chat room".
 
 Words never used for the place: server, channel, sky (as a name), check-in,
 profile, followers. "Sky" may describe the picture, never name the place.

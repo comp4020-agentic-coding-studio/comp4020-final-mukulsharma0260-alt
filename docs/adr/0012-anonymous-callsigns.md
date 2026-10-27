@@ -4,6 +4,13 @@ A visitor may choose an anonymous callsign, independent of any star
 
 # Status: Accepted (amended: Common Room chat; amended again: subject-room chat; amended again: expiry enforcement)
 
+Reading order: each amendment below supersedes the rule wording before it.
+The current free-text rule is in CLAUDE.md (a callsign and a 1-280
+character message body, in the Common Room and in constellations). As of
+27 October 2026 the expiry-enforcement amendment (the deletion sweep and
+`message.expired`) is committed locally but not yet deployed; production
+already hides expired messages through the read-path filter.
+
 # Context
 
 Live chat is coming (Common Room and per-constellation conversations), and a
