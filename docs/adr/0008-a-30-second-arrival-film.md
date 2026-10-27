@@ -73,3 +73,20 @@ the whole film again, skippable as before. Reduced motion, Save-Data and
 2g still get no film. Nothing about the visitor is reset: cookie, star,
 callsign and conversations all stay. The arrival still opens no stream and
 sends no check-in until Enter (ADR 0006).
+
+Amended 28 October 2026: every page load now starts on the arrival screen,
+for first-time and returning visitors alike. This supersedes the line above
+that a browser which has entered before goes straight into the lounge. The
+`overlap-arrival-v2` flag is removed from localStorage on load, so no
+browser keeps skipping the arrival. `overlap-film-seen` now means only that
+the full film has been watched or skipped once. On a first visit, Enter
+plays the film, skippable from the first second. On a returning visit,
+Enter goes straight into the lounge, and a smaller "Watch the arrival film
+(30s)" control plays the film on demand. Escape does nothing on the arrival
+screen; during the film, Escape, Enter and Skip all skip it. Reduced
+motion, Save-Data and 2g are never offered the film and Enter goes straight
+in. "Replay arrival experience" returns to the arrival screen as before;
+from there Enter goes straight in and the Watch control plays the film. The
+arrival galaxy is preloaded so it paints first, with no flash of the
+lounge. The arrival still opens no stream, sends no check-in and creates no
+star until Enter (ADR 0006).

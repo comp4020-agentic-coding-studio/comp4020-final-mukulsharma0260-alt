@@ -44,7 +44,7 @@ What the agent needs to carry from any of it is your call.
 
 No media file without its source and licence recorded in docs/credits.md; nothing from social media and no commercial music.
 
-A visitor counts as here only after entering the lounge; the arrival screen never opens the live stream or calls /api/here.
+Every page load starts on the arrival screen (ADR 0008). On a first visit Enter plays the film; on a returning visit Enter goes straight into the lounge and "Watch the arrival film (30s)" plays it. Escape does nothing on the arrival screen. A visitor counts as here only after entering the lounge; the arrival screen never opens the live stream, calls /api/here or creates a star.
 
 A star's constellation lives only on the star in SQLite, set by its own cookie through `POST /api/star/constellation`; never in localStorage, never backfilled for old stars.
 
