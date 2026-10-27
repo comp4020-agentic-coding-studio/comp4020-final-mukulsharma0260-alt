@@ -17,18 +17,22 @@ What the agent needs to carry from any of it is your call.
 - The database stores only a SHA-256 hash of the anonymous identity token.
 - Cookie tokens and token hashes must never appear in HTML, browser JavaScript, logs, or tests.
 - Audit logs go through `src/audit.ts` and use only a public star id (or `anonymous`) as the actor, plus fixed fields: a room (one of six names), a reason or change word, and whole-number counts. They never contain cookie tokens, token hashes, cookies, IP addresses, raw request bodies, locations, message text, or anyone's timestamps. Log actions, refusals, broadcasts, snapshots, and a star joining or leaving (its first visible stream opening, its last closing); never page loads, keep-alives or stream contents. Every refusal is logged with a reason.
-- Other people's exact timestamps must never appear in the HTML, attributes, visible UI, or logs. Show only rough buckets.
-- The app accepts one kind of free text: a callsign, 3-16 characters, letters/digits/spaces/hyphens/underscores only, validated and checked for uniqueness server-side (`src/callsign.ts`, ADR 0012). No other free text is accepted yet.
+- Other people's exact timestamps must never appear in the HTML, attributes, visible UI, or logs. Show only rough buckets. One exception: a chat message may carry and show its own send time, to the minute. The exception covers only that message's own time; star and presence times stay rough buckets.
+- The app accepts two kinds of free text, both validated server-side (ADR 0012): a callsign, 3-16 characters, letters/digits/spaces/hyphens/underscores only, unique (`src/callsign.ts`); and a chat message body, 1-280 characters. No other free text is accepted.
 - A callsign belongs to the anonymous identity (its cookie token's hash), never to a star: a visitor may have one before placing a star, a star may exist with no callsign, and neither requires the other. A callsign, once claimed, is never released or recycled in this version.
 - Before interpreting a live result, state local HEAD, deployed SHA if known, and whether the tree is clean.
 - Do not claim a visitor is physically present. For Crit 8, "last seen" means their last successful request to `/api/here`.
 - For Crit 9, a star is glowing only while at least one authenticated browser has the lounge open in a visible tab. Never claim a person is physically here.
 - `/events` may hold temporary connection state in server memory, but it must never write that state to SQLite. A deploy or restart clears it and reconnecting browsers rebuild it.
-- Live events may expose only a star id, normalised coordinates, a rough brightness bucket, the star's constellation id (one of five fixed values, ADR 0010), and counts (live, traces, listeners per Break mode). They must never expose a cookie token, token hash, or anybody's exact timestamp.
+- Star and presence events may expose only a star id, normalised coordinates, a rough brightness bucket, the star's constellation id (one of five fixed values, ADR 0010), and counts (live, traces, listeners per Break mode). Chat events may expose only a message id, its room, the callsign snapshot, the body and its own send time, and never a star id. No event may expose a cookie token or token hash, and none except a chat message's own send time may carry an exact timestamp.
 - A move made by one browser must reach another open browser through `/events` without a reload, within about one second; keep a check that proves it.
 - A test that passes on rerun is a failing test until its cause is found.
-- Live checks against production are read-only. If a live check must write, it deletes what it created in the same step and reports the ids.
+- Live checks against production are read-only unless the user explicitly approves a write first. Stars and callsigns have no delete path and a callsign is never released, so an approved write is permanent: report the ids it creates.
 - Back up SQLite only after a WAL checkpoint; copying the main file alone misses recent writes.
+- A push to `main` is a deploy: CI deploys every green push automatically. Take the checkpoint and backup before pushing anything that carries a migration, and never push without the user's approval of the backup and deploy sequence.
+- The app runs on exactly one Fly machine (`--ha=false`). SQLite on its volume and the in-memory SSE bus, presence and rate limits are not shared between machines, so never scale out or claim multi-machine support.
+- A conversation's messages are delivered only to streams subscribed to that room (`src/chat-rooms.ts`), never broadcast to every stream and filtered in the browser. A constellation's conversation is postable only by a star settled there, re-checked on every post.
+- Message expiry is a server rule: an expired message is never returned by any read path. Never describe expiry as only a browser effect, and never claim a message is erased from backups or volume snapshots.
 - Presence lives in memory only, never in the database.
 - Every live event follows the same privacy rules as the page.
 - Never claim a person is physically present; live means an open, visible tab.
