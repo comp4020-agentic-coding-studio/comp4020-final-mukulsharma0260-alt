@@ -71,12 +71,13 @@ async function loadSky(opts: {
     },
   });
 
-  // Most checks begin in the lounge, as a browser that has entered before:
-  // it has seen the film, so its Enter goes straight in. Every load still
-  // starts on the arrival screen, so they press Enter themselves.
-  if (opts.checkedIn !== false) window.localStorage.setItem("overlap-film-seen", "1");
   window.eval(skyJs);
-  if (opts.checkedIn !== false) window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  // Most checks begin in the lounge. Every load starts on the arrival screen
+  // and Enter plays the film, so they enter and skip it.
+  if (opts.checkedIn !== false) {
+    window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    window.document.getElementById("film-skip")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  }
 
   return {
     window,

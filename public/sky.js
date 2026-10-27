@@ -9,11 +9,13 @@ let statusTimer;
 let realtime;
 let skyActive = false;
 
-// Every load starts on the arrival screen (ADR 0008). An earlier version
-// remembered "entered" here and skipped the arrival for returning browsers;
-// that flag is removed so no browser keeps skipping it.
+// Every load starts on the arrival screen, and Enter plays the film on every
+// visit (ADR 0008). Earlier versions remembered "entered" and "film seen"
+// here and skipped one or the other; both flags are removed so no browser
+// keeps skipping the entrance.
 try {
   window.localStorage.removeItem("overlap-arrival-v2");
+  window.localStorage.removeItem("overlap-film-seen");
 } catch {
   // Blocked storage only means there was nothing to remove.
 }
@@ -1384,10 +1386,9 @@ function stopArrivalVideo() {
 // Luna AI video, full-screen and silent, over the arrival's galaxy, with the
 // author's own music. The cloud and the music are downloaded only after
 // Enter. The visitor only counts as glowing once the lounge opens (joinLounge),
-// never during the film. Later entries, and reduced motion, skip it.
+// never during the film. Reduced motion, Save-Data and 2g skip it.
 
 const FILM_MS = 30_000;
-const FILM_SEEN_KEY = "overlap-film-seen";
 const FILM_MUTED_KEY = "overlap-film-muted";
 // Shown in this order. Six 5-second slots fit in the film, so the first two
 // share the opening slot and "Settling in…" is the last thing read.
@@ -1410,7 +1411,6 @@ const filmBar = document.querySelector("#arrival-film .film-bar");
 const filmRemaining = document.getElementById("film-remaining");
 const filmSkip = document.getElementById("film-skip");
 const filmSound = document.getElementById("film-sound");
-const arrivalWatch = document.getElementById("arrival-watch");
 
 let filming = false;
 let filmStartedAt = 0;
@@ -1560,16 +1560,16 @@ function updateFilmBar() {
 }
 
 // --- The film's timeline ---------------------------------------------------
-// The film is a first-visit gift, never a toll: reduced motion, Save-Data
-// and 2g connections go straight into the lounge, as do returning browsers.
+// The film is the entrance on every visit, never a toll: Skip, Enter and
+// Escape end it from the first second, and reduced motion, Save-Data and 2g
+// connections go straight into the lounge.
 function filmAllowed() {
-  return Boolean(filmEl) && arrivalVideoAllowed() && !readFlag(FILM_SEEN_KEY);
+  return Boolean(filmEl) && arrivalVideoAllowed();
 }
 
 function playFilm() {
   filming = true;
   filmStartedAt = Date.now();
-  writeFlag(FILM_SEEN_KEY, true);
   stopArrivalVideo();
   document.body.classList.add("filming");
   filmEl.setAttribute("aria-hidden", "false");
@@ -1611,25 +1611,12 @@ document.addEventListener("visibilitychange", () => {
   else filmCloud?.play()?.catch(() => {});
 });
 
-// Enter plays the film on a browser's first visit, and goes straight into
-// the lounge on every later one (and always under reduced motion,
-// Save-Data or 2g).
+// Enter plays the film, or goes straight into the lounge under reduced
+// motion, Save-Data or 2g.
 function enterLounge() {
   if (skyActive || filming) return;
   if (filmAllowed()) playFilm();
   else activateSky();
-}
-
-// A returning browser can still watch the film, on request.
-function watchFilm() {
-  if (skyActive || filming || !filmEl || !arrivalVideoAllowed()) return;
-  playFilm();
-}
-
-// The film is offered on the arrival screen only to a browser that has seen
-// it and may play it; a first visit gets it from Enter instead.
-function updateWatchControl() {
-  if (arrivalWatch) arrivalWatch.hidden = !(filmEl && arrivalVideoAllowed() && readFlag(FILM_SEEN_KEY));
 }
 
 // The lounge's way back to the arrival screen. Nothing about the visitor is
@@ -1637,7 +1624,7 @@ function updateWatchControl() {
 // all stay. Leaving is the same as hiding the tab: the stream closes, so the
 // star stops glowing, and Break stops so nobody on the arrival screen is
 // counted as listening. The arrival is only a picture again until Enter
-// (ADR 0006), where the film can be watched again.
+// (ADR 0006), and Enter plays the film again.
 function replayArrival() {
   if (!skyActive || filming) return;
   openChat(false);
@@ -1651,7 +1638,6 @@ function replayArrival() {
   document.body.classList.remove("entered");
   document.getElementById("sky-app")?.setAttribute("aria-hidden", "true");
   document.getElementById("arrival")?.removeAttribute("aria-hidden");
-  updateWatchControl();
   loadArrivalVideo();
   arrivalButton?.focus();
 }
@@ -1719,7 +1705,6 @@ function activateSky() {
   });
 
   arrivalButton?.addEventListener("click", enterLounge);
-  arrivalWatch?.addEventListener("click", watchFilm);
   document.getElementById("replay-arrival")?.addEventListener("click", replayArrival);
   filmSkip?.addEventListener("click", endFilm);
   filmSound?.addEventListener("click", toggleSound);
@@ -1740,7 +1725,6 @@ function activateSky() {
     else if (picked) setPicked(false);
   });
 
-  updateWatchControl();
   arrivalButton?.focus();
 
   if (document.readyState === "complete") loadArrivalVideo();

@@ -20,7 +20,6 @@ async function open(opts: { hash?: string; cookie?: string; sync?: Sync; fetch?:
   const html = await (await fetch(new URL("/", baseUrl), { headers: opts.cookie ? { Cookie: opts.cookie } : {} })).text();
   const dom = new JSDOM(html, { url: new URL(opts.hash ?? "", baseUrl).toString(), runScripts: "outside-only" });
   const { window } = dom;
-  window.localStorage.setItem("overlap-film-seen", "1");
   const listeners: Record<string, (e: { data: string }) => void> = {};
   const plays: string[] = [];
   Object.assign(window, {
@@ -38,8 +37,10 @@ async function open(opts: { hash?: string; cookie?: string; sync?: Sync; fetch?:
   const errors: unknown[] = [];
   window.addEventListener("error", (e) => errors.push(e.error ?? e.message));
   window.eval(skyJs);
-  // Every load starts on the arrival screen; these checks begin in the lounge.
+  // Every load starts on the arrival screen and Enter plays the film; these
+  // checks begin in the lounge, so they enter and skip it.
   window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  window.document.getElementById("film-skip")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   if (opts.sync) listeners.sync?.({ data: JSON.stringify(opts.sync) });
   const doc = window.document;
   return { window, doc, html, listeners, errors, plays, close: () => window.close() };

@@ -377,25 +377,6 @@ export function renderHomePage(
   }
   /* Only the arrival button sits lower, towards the horizon. */
   #arrival-submit { transform: translateY(clamp(4rem, 15vh, 8.5rem)); }
-  /* A returning browser's quiet second choice, under Enter. */
-  #arrival-watch {
-    display: block;
-    min-height: 44px;
-    margin: 0 auto;
-    padding: 0 1rem;
-    transform: translateY(clamp(4.5rem, 16vh, 9rem));
-    border: 0;
-    background: none;
-    color: #f2f2f3;
-    font: 0.86rem/1 system-ui, sans-serif;
-    text-decoration: underline;
-    text-underline-offset: 0.2em;
-    text-shadow: 0 1px 12px rgba(0, 0, 0, 0.9);
-    cursor: pointer;
-  }
-  #arrival-watch[hidden] { display: none; }
-  #arrival-watch:hover { color: #ffffff; }
-  #arrival-watch:focus-visible { outline: 2px solid rgba(250, 244, 230, 0.85); outline-offset: 3px; border-radius: 0.15rem; }
   #arrival-submit:hover, .lounge-button:hover { color: #050506; background: #ffffff; border-color: #ffffff; }
   /* Keyboard focus is always visible: a soft ivory ring rather than a hard
      white box, so it reads as part of the scene. */
@@ -1161,7 +1142,6 @@ export function renderHomePage(
     <h1 id="arrival-title">STUDY, NOT ALONE.</h1>
     <p class="arrival-copy">A quiet place for late-night study. Arrive anonymously, see that others are here, and keep each other company without profiles or pressure.</p>
     <button id="arrival-submit" type="button">ENTER THE LOUNGE →</button>
-    <button id="arrival-watch" type="button" hidden>Watch the arrival film (30s)</button>
   </div>
 </section>
 <section id="arrival-film" aria-hidden="true" aria-label="Arriving in the lounge">

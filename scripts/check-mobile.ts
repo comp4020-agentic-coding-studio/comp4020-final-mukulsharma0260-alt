@@ -44,15 +44,15 @@ try {
     for (const state of STATES) {
       const size = `${w}x${h}`;
       const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: isPhone(w, h) });
-      // A browser that has seen the film, so Enter goes straight in.
-      await ctx.addInitScript(() => window.localStorage.setItem("overlap-film-seen", "1"));
       if (state === "star") {
         const res = await ctx.request.post(new URL("/api/star", APP_URL).toString(), { data: {} });
         if (!res.ok()) throw new Error(`could not place a star: ${res.status()}`);
       }
       const page = await ctx.newPage();
       await page.goto(APP_URL, { waitUntil: "load" });
+      // Enter plays the film on every visit; skip it into the lounge.
       await page.click("#arrival-submit");
+      await page.click("#film-skip");
       // The arrival fades out over 600ms.
       await page.waitForTimeout(900);
 

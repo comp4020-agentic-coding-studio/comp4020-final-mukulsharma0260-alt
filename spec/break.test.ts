@@ -20,7 +20,6 @@ async function open(opts: { cookie?: string; fetch?: (url: string, init?: { body
   const html = await (await fetch(new URL("/", baseUrl), { headers: opts.cookie ? { Cookie: opts.cookie } : {} })).text();
   const dom = new JSDOM(html, { url: baseUrl, runScripts: "outside-only" });
   const { window } = dom;
-  window.localStorage.setItem("overlap-film-seen", "1");
   const listeners: Record<string, (e: { data: string }) => void> = {};
   const media = { plays: [] as string[], pauses: 0 };
   Object.assign(window, {
@@ -45,8 +44,14 @@ async function open(opts: { cookie?: string; fetch?: (url: string, init?: { body
     this.dispatchEvent(new window.Event("pause"));
   };
   window.eval(skyJs);
-  // Every load starts on the arrival screen; these checks begin in the lounge.
+  // Every load starts on the arrival screen and Enter plays the film; these
+  // checks begin in the lounge, so they enter and skip it.
   window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  window.document.getElementById("film-skip")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  // The film's own video played and paused on the way in; these checks are
+  // about Break's audio only, so start the record from the lounge.
+  media.plays.length = 0;
+  media.pauses = 0;
   return { window, doc: window.document, listeners, media, close: () => window.close() };
 }
 

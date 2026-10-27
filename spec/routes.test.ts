@@ -22,7 +22,6 @@ async function open(hash: string, cookie?: string) {
   const html = await (await fetch(new URL("/", baseUrl), { headers: cookie ? { Cookie: cookie } : {} })).text();
   const dom = new JSDOM(html, { url: new URL(hash, baseUrl).toString(), runScripts: "outside-only" });
   const { window } = dom;
-  window.localStorage.setItem("overlap-film-seen", "1");
   const listeners: Record<string, (e: { data: string }) => void> = {};
   Object.assign(window, {
     matchMedia: () => ({ matches: false, addEventListener() {} }),
@@ -39,8 +38,10 @@ async function open(hash: string, cookie?: string) {
   const errors: unknown[] = [];
   window.addEventListener("error", (e) => errors.push(e.error ?? e.message));
   window.eval(skyJs);
-  // Every load starts on the arrival screen; these checks begin in the lounge.
+  // Every load starts on the arrival screen and Enter plays the film; these
+  // checks begin in the lounge, so they enter and skip it.
   window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  window.document.getElementById("film-skip")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   return { window, doc: window.document, html, listeners, errors };
 }
 

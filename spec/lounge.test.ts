@@ -16,7 +16,6 @@ async function loadLounge(opts: { cookie?: string; hash?: string; sync?: Sync } 
   const html = await res.text();
   const dom = new JSDOM(html, { url: new URL(opts.hash ?? "", baseUrl).toString(), runScripts: "outside-only" });
   const { window } = dom;
-  window.localStorage.setItem("overlap-film-seen", "1");
 
   const listeners: Record<string, (e: { data: string }) => void> = {};
   Object.assign(window, {
@@ -32,8 +31,10 @@ async function loadLounge(opts: { cookie?: string; hash?: string; sync?: Sync } 
   window.HTMLMediaElement.prototype.play = () => Promise.resolve();
   window.HTMLMediaElement.prototype.pause = () => {};
   window.eval(skyJs);
-  // Every load starts on the arrival screen; these checks begin in the lounge.
+  // Every load starts on the arrival screen and Enter plays the film; these
+  // checks begin in the lounge, so they enter and skip it.
   window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  window.document.getElementById("film-skip")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   if (opts.sync) listeners.sync?.({ data: JSON.stringify(opts.sync) });
   return { window, doc: window.document, html, listeners, close: () => window.close() };
 }
@@ -304,7 +305,6 @@ it("your new star stays yours even when its live broadcast arrives before your o
   const res = await fetch(new URL("/", baseUrl));
   const dom = new JSDOM(await res.text(), { url: baseUrl, runScripts: "outside-only" });
   const { window } = dom;
-  window.localStorage.setItem("overlap-film-seen", "1");
   const listeners: Record<string, (e: { data: string }) => void> = {};
   let releaseReply: () => void = () => {};
   const star = { id: "race-star", x: 0.4, y: 0.6, brightness: "bright", constellation: null };
@@ -324,8 +324,10 @@ it("your new star stays yours even when its live broadcast arrives before your o
   window.HTMLMediaElement.prototype.play = () => Promise.resolve();
   window.HTMLMediaElement.prototype.pause = () => {};
   window.eval(skyJs);
-  // Every load starts on the arrival screen; these checks begin in the lounge.
+  // Every load starts on the arrival screen and Enter plays the film; these
+  // checks begin in the lounge, so they enter and skip it.
   window.document.getElementById("arrival-submit")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  window.document.getElementById("film-skip")?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   try {
     listeners.sync?.({ data: JSON.stringify({ stars: [], liveStarIds: [] }) });
     window.document.getElementById("place-star")!.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));

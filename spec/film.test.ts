@@ -119,8 +119,6 @@ async function loadFilm(opts: {
     key: (key: string) => doc.dispatchEvent(new window.KeyboardEvent("keydown", { key, bubbles: true })),
     skip: () => $("film-skip")!.dispatchEvent(new window.MouseEvent("click", { bubbles: true })),
     replay: () => $("replay-arrival")!.dispatchEvent(new window.MouseEvent("click", { bubbles: true })),
-    watch: () => $("arrival-watch")!.dispatchEvent(new window.MouseEvent("click", { bubbles: true })),
-    watchShown: () => { const w = $("arrival-watch"); return Boolean(w) && !w!.hidden; },
     filmShown: () => doc.body.classList.contains("filming"),
     entered: () => doc.body.classList.contains("entered"),
     line: () => ($("film-line")?.textContent ?? "").trim(),
@@ -197,7 +195,7 @@ it("the visitor is not glowing before the lounge opens", async () => {
   }
 });
 
-it("a second entry skips the film", async () => {
+it("a second entry plays the film again: it is the entrance, not a first-visit extra", async () => {
   const first = await loadFilm();
   let saved: Record<string, string> = {};
   try {
@@ -210,26 +208,29 @@ it("a second entry skips the film", async () => {
   } finally {
     first.close();
   }
-  // A browser that already watched or skipped is shown the arrival screen
-  // again, and its Enter goes straight into the lounge.
+  // Nothing remembers that the film was seen.
   expect(saved["overlap-arrival-v2"]).toBeUndefined();
+  expect(saved["overlap-film-seen"]).toBeUndefined();
   const again = await loadFilm({ storage: saved });
   try {
+    expect(again.entered()).toBe(false);
     again.enter();
-    expect(again.filmShown()).toBe(false);
-    expect(again.entered()).toBe(true);
+    expect(again.filmShown()).toBe(true);
+    expect(again.entered()).toBe(false);
+    expect(again.streamsOpen()).toBe(0);
   } finally {
     again.close();
   }
 });
 
-// A browser that has entered before, as it was stored before this change:
-// the old arrival flag (now removed on load) and the film flag.
+// A browser that has entered before, as earlier versions stored it: the old
+// arrival flag and the old film flag, both now removed on load.
 const RETURNING = { "overlap-arrival-v2": "entered", "overlap-film-seen": "1" };
 
-it("every load starts on the arrival screen, even for a returning visitor with a star and the old flag", async () => {
+it("a returning visitor with a star and the old flags sees the arrival, then Enter plays the film", async () => {
   const created = await fetch(new URL("/api/star", baseUrl), { method: "POST", body: "{}" });
   const cookie = created.headers.get("set-cookie")!.split(";")[0]!;
+  const starId = ((await created.json()) as { star: { id: string } }).star.id;
   const f = await loadFilm({ storage: RETURNING, cookie });
   try {
     await vi.advanceTimersByTimeAsync(5_000);
@@ -240,9 +241,21 @@ it("every load starts on the arrival screen, even for a returning visitor with a
     // The arrival is only a picture: no stream, no check-in, no star.
     expect(f.streamsOpen()).toBe(0);
     expect(f.posts).toEqual([]);
-    // The old flag is removed, so no later code can be tempted to read it.
+    // Both old flags are removed, so nothing can skip the entrance again.
     expect(f.window.localStorage.getItem("overlap-arrival-v2")).toBeNull();
-    expect(f.window.localStorage.getItem("overlap-film-seen")).toBe("1");
+    expect(f.window.localStorage.getItem("overlap-film-seen")).toBeNull();
+
+    f.enter();
+    expect(f.filmShown()).toBe(true);
+    expect(f.entered()).toBe(false);
+    expect(f.streamsOpen()).toBe(0);
+    expect(f.posts).toEqual([]);
+    f.skip();
+    expect(f.entered()).toBe(true);
+    expect(f.streamsOpen()).toBe(1);
+    expect(f.doc.body.dataset.ownStar).toBe(starId);
+    // Skipping does not bring the flag back.
+    expect(f.window.localStorage.getItem("overlap-film-seen")).toBeNull();
   } finally {
     f.close();
   }
@@ -256,48 +269,22 @@ it("a fresh visitor sees the arrival screen and sends nothing before Enter", asy
     expect(f.streamsOpen()).toBe(0);
     expect(f.posts).toEqual([]);
     expect(f.gets.filter((u) => u.includes("/events") || u.includes("/api/here"))).toEqual([]);
-    // A first visit has the film ahead of it, so there is nothing to offer.
-    expect(f.watchShown()).toBe(false);
   } finally {
     f.close();
   }
 });
 
-it("a returning visitor's Enter opens the lounge with the same star and plays no film", async () => {
-  const created = await fetch(new URL("/api/star", baseUrl), { method: "POST", body: "{}" });
-  const cookie = created.headers.get("set-cookie")!.split(";")[0]!;
-  const starId = ((await created.json()) as { star: { id: string } }).star.id;
-  const f = await loadFilm({ storage: RETURNING, cookie });
-  try {
-    expect(f.entered()).toBe(false);
-    expect(f.streamsOpen()).toBe(0);
-    f.enter();
-    expect(f.filmShown()).toBe(false);
-    expect(f.entered()).toBe(true);
-    expect(f.streamsOpen()).toBe(1);
-    expect(f.audio.created).toBe(0);
-    expect(f.doc.body.dataset.ownStar).toBe(starId);
-  } finally {
-    f.close();
-  }
-});
-
-it("a returning visitor can watch the arrival film on demand", async () => {
-  const f = await loadFilm({ storage: RETURNING });
-  try {
-    const watch = f.doc.getElementById("arrival-watch") as HTMLButtonElement | null;
-    expect(f.watchShown()).toBe(true);
-    expect(watch?.tagName).toBe("BUTTON");
-    expect(watch?.textContent?.replace(/\s+/g, " ").trim()).toBe("Watch the arrival film (30s)");
-    f.watch();
-    expect(f.filmShown()).toBe(true);
-    expect(f.entered()).toBe(false);
-    expect(f.streamsOpen()).toBe(0);
-    f.skip();
-    expect(f.entered()).toBe(true);
-    expect(f.streamsOpen()).toBe(1);
-  } finally {
-    f.close();
+it("the arrival screen has one way in: there is no separate Watch control", async () => {
+  for (const storage of [undefined, RETURNING]) {
+    const f = await loadFilm({ storage });
+    try {
+      expect(f.doc.getElementById("arrival-watch")).toBeNull();
+      const words = f.doc.getElementById("arrival")?.textContent ?? "";
+      expect(words).not.toMatch(/watch the arrival film/i);
+      expect([...f.doc.querySelectorAll("#arrival button")].map((b) => b.id)).toEqual(["arrival-submit"]);
+    } finally {
+      f.close();
+    }
   }
 });
 
@@ -316,13 +303,12 @@ it("on the arrival screen Escape does nothing; only Enter enters", async () => {
 for (const [name, opts] of [
   ["reduced motion", { reducedMotion: true }],
   ["Save-Data", { connection: { saveData: true } }],
+  ["2g", { connection: { effectiveType: "2g" } }],
+  ["slow-2g", { connection: { effectiveType: "slow-2g" } }],
 ] as const) {
-  it(`under ${name} the film is never offered or played, and Enter goes straight in`, async () => {
+  it(`under ${name} a returning visitor gets no film and no music either, and Enter goes straight in`, async () => {
     const f = await loadFilm({ storage: RETURNING, ...opts });
     try {
-      // The control exists on the arrival screen, but is never offered here.
-      expect(f.doc.getElementById("arrival-watch")).not.toBeNull();
-      expect(f.watchShown()).toBe(false);
       expect(f.entered()).toBe(false);
       f.enter();
       expect(f.filmShown()).toBe(false);
@@ -342,6 +328,7 @@ it("a returning visitor can replay the arrival and its film, then return with th
   const f = await loadFilm({ storage: RETURNING, cookie });
   try {
     f.enter();
+    f.skip();
     expect(f.entered()).toBe(true);
     expect(f.streamsOpen()).toBe(1);
     const checkIns = f.posts.length;
@@ -358,8 +345,8 @@ it("a returning visitor can replay the arrival and its film, then return with th
     expect(f.streamsOpen()).toBe(0);
     expect(f.posts).toHaveLength(checkIns);
 
-    // Watch plays the full film again, even though it was seen before.
-    f.watch();
+    // Enter plays the full film again.
+    f.enter();
     expect(f.filmShown()).toBe(true);
     expect(f.streamsOpen()).toBe(0);
     expect(f.posts).toHaveLength(checkIns);
@@ -370,7 +357,6 @@ it("a returning visitor can replay the arrival and its film, then return with th
     // Only check-ins were ever sent: nothing created, renamed or reset.
     expect(f.posts.length).toBeGreaterThan(checkIns);
     expect(new Set(f.posts)).toEqual(new Set(["/api/here"]));
-    expect(f.window.localStorage.getItem("overlap-film-seen")).toBe("1");
     expect(f.doc.body.dataset.ownStar).toBe(starId);
   } finally {
     f.close();
@@ -384,6 +370,7 @@ it("the replay control is a keyboard-reachable button in the lounge, labelled Re
   const f = await loadFilm({ storage: RETURNING });
   try {
     f.enter();
+    f.skip();
     const button = f.doc.getElementById("replay-arrival") as HTMLButtonElement | null;
     expect(button?.tagName).toBe("BUTTON");
     expect(button?.type).toBe("button");
@@ -505,10 +492,11 @@ it("mute is an accessible pill, suspends the sound, and is remembered", async ()
   } finally {
     f.close();
   }
-  const { "overlap-arrival-v2": _e, "overlap-film-seen": _s, ...muteOnly } = saved;
-  const again = await loadFilm({ storage: muteOnly });
+  // The next visit plays the film again, and remembers only the mute choice.
+  const again = await loadFilm({ storage: saved });
   try {
     again.enter();
+    expect(again.filmShown()).toBe(true);
     const pill = again.doc.getElementById("film-sound")!;
     expect(pill.getAttribute("aria-pressed")).toBe("true");
     expect(again.audio.created).toBe(0);
