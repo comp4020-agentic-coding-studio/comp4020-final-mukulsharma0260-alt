@@ -24,7 +24,10 @@ however you run it and `pnpm check` finds it at `APP_URL` (default
 ## Your checks
 
 Everything else in `spec/` is yours to write. Any `spec/*.test.ts` runs with
-`pnpm check`, against the same running app. Some lines of a spec only a person
+`pnpm check`, against the same running app. The phone layout is checked
+separately in a real browser by `scripts/check-mobile.ts` (Playwright, against a
+local throwaway server); each run's results are kept in
+`docs/evidence/mobile-check.md`. Some lines of a spec only a person
 can judge; those are left to the crit and the marker.
 
 At a crit, a green `check` job is half the shipped mark, but it's never the
