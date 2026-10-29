@@ -1309,6 +1309,14 @@ export function renderHomePage(
     .chat-panel, .break-panel { inset: 0; top: 0; width: auto; max-height: none; height: 100dvh; border: 0; border-radius: 0; padding: calc(var(--space-3) + env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right)) calc(var(--space-4) + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left)); z-index: 9; }
     .chat-messages { max-height: none; }
     .chat-panel .callsign-panel { margin: var(--space-3) 0 0; }
+
+    /* Constellation names: still 12px, with less spacing so they fit
+       between regions (sky.js anchors each toward the middle), and quieter
+       outlines so the field reads as stars first. */
+    a.region { padding: var(--space-1) var(--space-2); }
+    .region-name { letter-spacing: 0.06em; }
+    .fig-edge { stroke: rgba(196, 200, 230, 0.09); }
+    .fig-node { stroke: rgba(196, 200, 230, 0.2); }
   }
   .phone-only { display: none; }
   @media (max-width: 600px), (max-height: 500px) {

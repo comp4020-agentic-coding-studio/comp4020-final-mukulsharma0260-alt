@@ -376,6 +376,10 @@ function drawFigures() {
   figuresLayer.replaceChildren(frag);
 }
 
+// How far across its region each name is anchored on a phone (0 left,
+// 0.5 centre, 1 right).
+const NAME_ANCHOR = { science: 0, health: 0, engineering: 0.5, business: 1, arts: 1 };
+
 // Doorways sit over their region of the Common Room, in screen percentages.
 function placeDoorways() {
   for (const [id, a] of doorways) {
@@ -386,8 +390,14 @@ function placeDoorways() {
     const area = doorwayAreas.get(id);
     const left = (p.px / frame.w) * 100;
     const top = (p.py / frame.h) * 100;
-    a.style.left = `${left.toFixed(2)}%`;
+    // On a phone the names are wider than the gaps between regions, so each
+    // anchors toward the middle: left-hand regions at their left edge,
+    // Engineering at its centre, right-hand ones at their right edge.
+    const anchor = phoneScreen() ? NAME_ANCHOR[id] ?? 0 : 0;
+    const at = left + (((q.px - p.px) / frame.w) * 100) * anchor;
+    a.style.left = `${at.toFixed(2)}%`;
     a.style.top = `${top.toFixed(2)}%`;
+    a.style.transform = anchor ? `translateX(-${anchor * 100}%)` : "";
     if (area) {
       area.style.left = `${left.toFixed(2)}%`;
       area.style.top = `${top.toFixed(2)}%`;
@@ -395,6 +405,21 @@ function placeDoorways() {
       area.style.height = `${(((q.py - p.py) / frame.h) * 100).toFixed(2)}%`;
     }
   }
+  separateNames();
+}
+
+// On the narrowest phones centred Engineering can still reach Business's
+// name. Measured, not guessed: if their boxes meet, Engineering moves down
+// just past Business's.
+function separateNames() {
+  const eng = doorways.get("engineering");
+  const bus = doorways.get("business");
+  if (!eng || !bus || !phoneScreen()) return;
+  const e = eng.getBoundingClientRect?.();
+  const b = bus.getBoundingClientRect?.();
+  if (!e || !b || !e.width || !b.width) return;
+  if (e.right <= b.left || b.right <= e.left || e.bottom <= b.top || b.bottom <= e.top) return;
+  eng.style.transform = `translateX(-50%) translateY(${Math.ceil(b.bottom - e.top + 4)}px)`;
 }
 
 function renderStars() {

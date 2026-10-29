@@ -440,3 +440,36 @@ it("No name, no profile appears at most once, and never in the collapsed phone d
     p.close();
   }
 });
+
+// ---- Constellation names on a phone ----------------------------------------
+it("on a phone each name anchors toward the middle so neighbours never meet: left, centre or right of its region", async () => {
+  const p = await openPhone();
+  try {
+    const anchor = (id: string) => p.doc.querySelector<HTMLElement>(`#regions a.region[data-region="${id}"]`)!.style.transform;
+    expect(anchor("science")).toBe("");
+    expect(anchor("health")).toBe("");
+    expect(anchor("engineering")).toBe("translateX(-50%)");
+    expect(anchor("business")).toBe("translateX(-100%)");
+    expect(anchor("arts")).toBe("translateX(-100%)");
+  } finally {
+    p.close();
+  }
+});
+
+it("on wider screens every name still starts at its region's left edge", async () => {
+  const p = await open();
+  try {
+    for (const a of p.doc.querySelectorAll<HTMLElement>("#regions a.region")) expect(a.style.transform).toBe("");
+  } finally {
+    p.close();
+  }
+});
+
+it("on a phone the names stay 12px with tighter spacing, and the outlines are quieter", async () => {
+  const sheet = await css();
+  const phone = sheet.slice(sheet.indexOf(`@media ${PHONE}`));
+  expect(phone).toMatch(/\.region-name\s*\{[^}]*letter-spacing:\s*0\.06em/);
+  expect(phone).toMatch(/\.fig-edge\s*\{[^}]*stroke:\s*rgba\(196, 200, 230, 0\.0\d\)/);
+  // 12px is the floor: the phone rule never shrinks the names below it.
+  expect(phone).not.toMatch(/\.region-name\s*\{[^}]*font-size:\s*(0\.[0-6]\d*rem|1[01]px)/);
+});

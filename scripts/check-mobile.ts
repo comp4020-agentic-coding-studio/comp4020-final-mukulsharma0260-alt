@@ -89,6 +89,9 @@ try {
           const r = el.getBoundingClientRect();
           return { name: el.getAttribute("data-region") ?? "", left: r.left, right: r.right, top: r.top, bottom: r.bottom };
         });
+        // A name cut off by the screen edge is as unreadable as one under
+        // another name.
+        const offscreen = labels.filter((l) => l.left < 0 || l.right > vw).map((l) => l.name);
         const overlaps: string[] = [];
         for (let i = 0; i < labels.length; i++) {
           for (let j = i + 1; j < labels.length; j++) {
@@ -117,6 +120,7 @@ try {
           dock: dock?.shown ? Math.round(dock.height) : 0,
           heroShown: Boolean(hero?.shown),
           overlaps,
+          offscreen,
           labelCount: labels.length,
           targets: targets.length,
           small: small.map((t) => `${t.name} ${t.w}x${t.h}`),
@@ -126,6 +130,8 @@ try {
       });
 
       record(size, state, "no sideways scroll", m.scrollX <= 0, `overflow ${m.scrollX}px`);
+      record(size, state, "constellation names fully on screen", m.offscreen.length === 0,
+        m.offscreen.length ? `cut off: ${m.offscreen.join(", ")}` : `${m.labelCount} names inside ${m.vw}px`);
       record(size, state, "constellation names do not overlap", m.overlaps.length === 0,
         m.overlaps.length ? `${m.labelCount} names, overlapping: ${m.overlaps.join(", ")}` : `${m.labelCount} names, none overlap`);
 
