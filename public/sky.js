@@ -533,7 +533,59 @@ function renderDock() {
     leave.hidden = false;
     leave.textContent = `Leave ${INFO[area]?.name}`;
   }
+  // On a phone the expanded dock offers the way into a constellation.
+  const studyIn = document.getElementById("study-in");
+  if (studyIn) studyIn.hidden = !hasStar() || inRoom || Boolean(area);
   setText("dock-note", note);
+  renderDockSummary(glowing);
+}
+
+// ---- The phone dock ------------------------------------------------------
+// Collapsed, it shows one thing: "Place your star" (which places it), or
+// the star's state (which opens the rest). Wider screens show it all.
+const dockEl = document.querySelector(".dock");
+const dockSummary = document.getElementById("dock-summary");
+const dockBody = document.getElementById("dock-body");
+
+function renderDockSummary(glowing) {
+  if (!dockSummary) return;
+  const inRoom = view !== "common";
+  const placing = !hasStar();
+  const words = placing
+    ? inRoom ? `Place your star in ${INFO[view]?.name ?? ""}` : "Place your star"
+    : glowing ? "Your star is glowing" : "Your star is connecting";
+  if (dockSummary.textContent !== words) dockSummary.textContent = words;
+  if (placing) {
+    dockSummary.dataset.action = "place";
+    dockSummary.removeAttribute("aria-expanded");
+  } else {
+    delete dockSummary.dataset.action;
+    dockSummary.setAttribute("aria-expanded", String(dockEl?.dataset.expanded === "true"));
+  }
+}
+
+function setDockExpanded(open, { restore = false } = {}) {
+  if (!dockEl || !dockBody) return;
+  dockEl.dataset.expanded = String(open);
+  dockBody.hidden = phoneScreen() && !open;
+  if (dockSummary && !dockSummary.dataset.action) dockSummary.setAttribute("aria-expanded", String(open));
+  if (restore) dockSummary?.focus();
+}
+
+function wireDock() {
+  setDockExpanded(false);
+  document.getElementById("study-in")?.addEventListener("click", () => {
+    setDockExpanded(false);
+    openSheet(document.getElementById("place-sheet"), placeToggle);
+  });
+  dockSummary?.addEventListener("click", () => {
+    if (dockSummary.dataset.action === "place") {
+      if (view !== "common") settleIn(view);
+      else placeStar();
+      return;
+    }
+    setDockExpanded(dockEl.dataset.expanded !== "true");
+  });
 }
 
 function render() {
@@ -944,7 +996,8 @@ async function placeStar(x, y, constellation) {
 // ---- Callsign ----------------------------------------------------------
 // An anonymous alias, chosen once and rarely changed, independent of
 // whether this browser has placed a star yet. Never a full-screen gate over
-// the star field: a compact step in the dock.
+// the star field: a compact step, in the dock on wider screens and in the
+// conversation on a phone.
 
 const callsignForm = document.getElementById("callsign-form");
 const callsignInput = document.getElementById("callsign-input");
@@ -952,6 +1005,30 @@ const callsignError = document.getElementById("callsign-error");
 const callsignCurrent = document.getElementById("callsign-current");
 const callsignCurrentName = document.getElementById("callsign-current-name");
 const callsignCancel = document.getElementById("callsign-cancel");
+
+// The callsign step is self-contained in #callsign-panel, so it can move or
+// go without touching the conversation. On wider screens it sits in the
+// dock; on a phone it lives in the conversation and appears only when a
+// visitor without a callsign first tries to send.
+const callsignPanel = document.getElementById("callsign-panel");
+let pendingMessage = null;
+
+function placeCallsignPanel() {
+  if (!callsignPanel) return;
+  const phone = phoneScreen();
+  const home = phone ? document.getElementById("chat-panel") : document.getElementById("dock-body");
+  const anchor = phone ? document.getElementById("chat-form") : document.querySelector("#dock-body .legend-section");
+  if (home && callsignPanel.parentElement !== home) home.insertBefore(callsignPanel, anchor ?? null);
+  callsignPanel.hidden = phone && !(callsignForm && !callsignForm.hidden && pendingMessage !== null);
+}
+
+function askForCallsign(message) {
+  pendingMessage = message;
+  if (callsignPanel) callsignPanel.hidden = false;
+  // The form says it all; the composer's note would only repeat it.
+  if (chatNote) chatNote.textContent = "";
+  showCallsignForm(true);
+}
 
 function showCallsignForm(show) {
   if (!callsignForm) return;
@@ -989,6 +1066,14 @@ async function submitCallsign(value) {
   showCallsignForm(false);
   announce(`You are ${callsign.callsign}.`);
   renderChatComposer();
+  // A message written before the callsign existed is sent now.
+  if (pendingMessage !== null) {
+    const text = pendingMessage;
+    pendingMessage = null;
+    if (phoneScreen() && callsignPanel) callsignPanel.hidden = true;
+    chatInput?.focus();
+    if (text.trim()) submitChatMessage(text.trim());
+  }
 }
 
 function wireCallsign() {
@@ -1141,7 +1226,10 @@ function renderChatComposer() {
   const room = currentChatRoom();
   if (chatTitle) chatTitle.textContent = chatRoomTitle(room);
   const settled = room === "common" || ownArea() === room;
-  const enabled = hasCallsign() && settled;
+  // On a phone, sending without a callsign asks for one inside the
+  // conversation, so the composer stays usable; wider screens keep the
+  // callsign step in the dock and the composer waits for it.
+  const enabled = settled && (hasCallsign() || phoneScreen());
   if (chatInput) chatInput.disabled = !enabled;
   const submit = chatForm?.querySelector("button[type=submit]");
   if (submit) submit.disabled = !enabled;
@@ -1149,7 +1237,7 @@ function renderChatComposer() {
     chatNote.textContent = !settled
       ? `Settle your star in ${INFO[room]?.name ?? room} to join this conversation.`
       : !hasCallsign()
-        ? "Choose a callsign to send a message."
+        ? phoneScreen() ? "You choose a callsign when you send your first message." : "Choose a callsign to send a message."
         : "";
   }
 }
@@ -1174,7 +1262,8 @@ function openChat(open, opener) {
   if (open) {
     chatOpener = opener ?? chatToggle;
     refreshChatForView();
-    (hasCallsign() ? chatInput : document.getElementById("callsign-input"))?.focus();
+    placeCallsignPanel();
+    (hasCallsign() || phoneScreen() ? chatInput : document.getElementById("callsign-input"))?.focus();
   } else if (wasOpen) {
     (chatOpener ?? chatToggle).focus();
   }
@@ -1211,6 +1300,11 @@ function wireChat() {
   document.getElementById("chat-close")?.addEventListener("click", () => openChat(false));
   chatForm?.addEventListener("submit", (e) => {
     e.preventDefault();
+    if (!hasCallsign() && phoneScreen()) {
+      const room = currentChatRoom();
+      if (room === "common" || ownArea() === room) askForCallsign(chatInput.value);
+      return;
+    }
     if (!canPostToCurrentRoom()) return;
     const text = chatInput.value.trim();
     if (!text) return;
@@ -1425,6 +1519,10 @@ function focusTrap() {
   if (chatPanel && !chatPanel.hidden) return chatPanel;
   if (breakPanel && !breakPanel.hidden) return breakPanel;
   return null;
+}
+
+function dockOpenOnPhone() {
+  return phoneScreen() && dockEl?.dataset.expanded === "true";
 }
 
 function trapTab(e) {
@@ -1820,6 +1918,8 @@ function activateSky() {
   wireCallsign();
   wireChat();
   wireSheets();
+  wireDock();
+  placeCallsignPanel();
   renderChatComposer();
 
   // Every link to a view changes view in place; the address bar follows.
@@ -1844,6 +1944,9 @@ function activateSky() {
       resizePending = false;
       relayout();
       placeStatus();
+      placeCallsignPanel();
+      setDockExpanded(dockEl?.dataset.expanded === "true");
+      renderChatComposer();
     });
   });
 
@@ -1869,6 +1972,7 @@ function activateSky() {
     if (e.key !== "Escape" || !skyActive) return;
     if (openSheetEl) closeSheet();
     else if (chatPanel && !chatPanel.hidden) openChat(false);
+    else if (dockOpenOnPhone()) setDockExpanded(false, { restore: true });
     else if (breakPanel && !breakPanel.hidden) openBreak(false);
     else if (picked) setPicked(false);
   });

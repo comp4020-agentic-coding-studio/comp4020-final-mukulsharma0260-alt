@@ -934,6 +934,10 @@ export function renderHomePage(
   .swatch-trace { background: radial-gradient(circle, rgba(156, 157, 180, 0.6) 0 12%, transparent 16%); }
   .swatch-you { box-shadow: inset 0 0 0 1.5px var(--color-gold); }
   .legend-toggle { flex-basis: 100%; }
+  /* On wider screens the legend is always shown; the section only folds on
+     a phone. */
+  .legend-section > summary { display: none; }
+  .dock-summary { display: none; }
   .chip-button { min-height: 2.25rem; padding: 0 var(--space-3); font-size: var(--text-xs); }
   .chip-button[aria-pressed="true"]::before { content: "✓ "; }
   @media (pointer: coarse) and (min-width: 761px) { .chip-button { min-height: var(--target); } }
@@ -1255,6 +1259,60 @@ export function renderHomePage(
        field's names or the dock. */
     #status { top: calc(var(--topbar-h) + var(--chooser-h)) !important; left: max(var(--gutter), env(safe-area-inset-left)); right: var(--gutter); text-align: left; font-size: var(--text-xs); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: rgba(3, 4, 14, 0.82); }
     #status.visible ~ .phone-line { visibility: hidden; }
+
+    /* The dock: collapsed to one 56px row over the safe area; expanded, at
+       most 60% of the screen and scrolling inside. */
+    .dock { left: 0; right: 0; bottom: 0; width: auto; max-height: 60dvh; overflow-y: auto; padding: 0 max(var(--gutter), env(safe-area-inset-right)) env(safe-area-inset-bottom) max(var(--gutter), env(safe-area-inset-left)); border-width: 1px 0 0; border-radius: var(--radius-2) var(--radius-2) 0 0; }
+    .dock-summary {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      width: 100%;
+      min-height: 3.5rem;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--color-gold);
+      font: 600 var(--text-xs)/1.2 var(--font-mono);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      text-align: left;
+      cursor: pointer;
+    }
+    .dock-summary:not([data-action])::before { content: ""; flex: none; width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--color-gold); box-shadow: 0 0 10px rgba(233, 196, 126, 0.5); }
+    .dock-summary:not([data-action])::after { content: "˄"; margin-left: auto; color: var(--color-ink-soft); font-size: var(--text-md); transition: transform var(--dur-fast) var(--ease-calm); }
+    .dock[data-expanded="true"] .dock-summary:not([data-action])::after { transform: rotate(180deg); }
+    .dock-summary[data-action] {
+      justify-content: center;
+      margin: var(--space-2) 0;
+      min-height: var(--target);
+      border-radius: var(--radius-pill);
+      background: var(--color-ink);
+      color: #070814;
+      box-shadow: var(--glow-live);
+      font: 600 var(--text-sm)/1 var(--font-ui);
+      letter-spacing: 0.01em;
+      text-transform: none;
+    }
+    .dock-body { padding-bottom: var(--space-3); }
+    .dock-body #you-status, .dock-body #place-star, .dock-body #settle-action { display: none !important; }
+    .dock-row { display: grid; gap: var(--space-3); }
+    .dock-actions { width: 100%; }
+    .dock-actions > * { flex: 1 1 auto; }
+    #where { font-size: var(--text-md); }
+    .legend-section { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--color-line); }
+    .legend-section > summary { display: flex; align-items: center; min-height: var(--target); color: var(--color-ink-muted); font: 500 var(--text-sm)/1 var(--font-ui); cursor: pointer; }
+    .legend-section .legend { margin: 0; padding: 0; border: 0; }
+    .chip-button { min-height: var(--target); }
+
+    /* The conversation and Break take the whole screen on a phone. */
+    .chat-panel, .break-panel { inset: 0; top: 0; width: auto; max-height: none; height: 100dvh; border: 0; border-radius: 0; padding: calc(var(--space-3) + env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right)) calc(var(--space-4) + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left)); z-index: 9; }
+    .chat-messages { max-height: none; }
+    .chat-panel .callsign-panel { margin: var(--space-3) 0 0; }
+  }
+  .phone-only { display: none; }
+  @media (max-width: 600px), (max-height: 500px) {
+    .dock-actions .phone-only:not([hidden]) { display: inline-flex; align-items: center; justify-content: center; }
   }
 </style>
 </head>
@@ -1355,7 +1413,9 @@ export function renderHomePage(
   <div id="status" role="status" aria-live="polite"></div>
   <p id="phone-line" class="phone-line" aria-hidden="true">Common Room · ${traceText(stars.length)}</p>
 
-  <section class="dock" aria-label="Your star">
+  <section class="dock" aria-label="Your star" data-expanded="false">
+    <button type="button" id="dock-summary" class="dock-summary" aria-expanded="false" aria-controls="dock-body"${ownStar ? "" : ` data-action="place"`}>${ownStar ? (ownGlowing ? "Your star is glowing" : "Your star is connecting") : "Place your star"}</button>
+    <div id="dock-body" class="dock-body">
     <div class="dock-row">
       <div class="dock-you">
         <p id="you-status"${ownStar ? "" : " hidden"}>${ownGlowing ? "Your star is glowing" : "Your star is connecting"}</p>
@@ -1367,6 +1427,7 @@ export function renderHomePage(
         <button type="button" id="place-star" class="lounge-button"${ownStar ? " hidden" : ""}>Place your star</button>
         <button type="button" id="settle-action" class="lounge-button" hidden></button>
         <button type="button" id="leave-area" class="quiet-button" hidden></button>
+        <button type="button" id="study-in" class="quiet-button phone-only" hidden>Study in a constellation…</button>
       </div>
     </div>
     <div id="callsign-panel" class="callsign-panel">
@@ -1376,19 +1437,23 @@ export function renderHomePage(
         <p class="callsign-hint">This is how your messages will appear. No account or profile is created. Please do not use your real name.</p>
         <div class="callsign-row">
           <input type="text" id="callsign-input" name="callsign" minlength="3" maxlength="16" autocomplete="off" placeholder="nightowl" value="${ownCallsign ? escapeAttr(ownCallsign) : ""}">
-          <button type="submit" class="lounge-button">Enter the Lounge</button>
+          <button type="submit" class="lounge-button">Save callsign</button>
           <button type="button" id="callsign-cancel" class="quiet-button"${ownCallsign ? "" : " hidden"}>Cancel</button>
         </div>
         <p id="callsign-error" role="alert" aria-live="assertive"></p>
       </form>
     </div>
-    <ul class="legend" aria-label="What the light means">
-      <li data-legend="live"><span class="swatch swatch-live" aria-hidden="true"></span>Studying now</li>
-      <li data-legend="recent"><span class="swatch swatch-recent" aria-hidden="true"></span>Recent</li>
-      <li data-legend="trace"><span class="swatch swatch-trace" aria-hidden="true"></span>Past trace</li>
-      <li data-legend="you"><span class="swatch swatch-you" aria-hidden="true"></span>You</li>
-      <li class="legend-toggle"><button type="button" id="traces-toggle" class="chip-button" aria-pressed="true">Past traces</button></li>
-    </ul>
+    <details class="legend-section" open>
+      <summary>What the light means</summary>
+      <ul class="legend" aria-label="What the light means">
+        <li data-legend="live"><span class="swatch swatch-live" aria-hidden="true"></span>Studying now</li>
+        <li data-legend="recent"><span class="swatch swatch-recent" aria-hidden="true"></span>Recent</li>
+        <li data-legend="trace"><span class="swatch swatch-trace" aria-hidden="true"></span>Past trace</li>
+        <li data-legend="you"><span class="swatch swatch-you" aria-hidden="true"></span>You</li>
+        <li class="legend-toggle"><button type="button" id="traces-toggle" class="chip-button" aria-pressed="true">Past traces</button></li>
+      </ul>
+    </details>
+    </div>
   </section>
 
   <div id="menu-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="menu-title" hidden>
