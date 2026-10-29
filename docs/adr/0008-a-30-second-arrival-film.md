@@ -90,3 +90,24 @@ from there Enter goes straight in and the Watch control plays the film. The
 arrival galaxy is preloaded so it paints first, with no flash of the
 lounge. The arrival still opens no stream, sends no check-in and creates no
 star until Enter (ADR 0006).
+
+Amended 29 October 2026: the film plays on every visit. It is the entrance
+to the lounge, not an extra, and Skip already makes it optional, so there is
+no reason to withhold it from a returning visitor. This supersedes the 28
+October amendment's first-visit-only film and its "Watch the arrival film
+(30s)" link, which are both removed. Every page load still starts on the
+arrival screen; ENTER then plays the full film, first visit or returning,
+and Skip, Enter and Escape end it from the first second. Escape still does
+nothing on the arrival screen itself. `overlap-film-seen` is removed from
+localStorage on load, beside `overlap-arrival-v2`, and nothing records that
+the film was seen. The Mute choice (`overlap-film-muted`) is still
+remembered. Reduced motion, Save-Data, 2g and slow-2g never play the film
+and ENTER goes straight in. "Replay arrival experience" returns to the
+arrival screen, and ENTER plays the film again. Nothing changes about
+presence: the arrival and the film open no stream, send no check-in and
+create no star; the stream opens only when the lounge does (ADR 0006).
+
+The cost moves from the first entry to every entry: a visitor who does not
+skip waits up to 30 seconds each time, and the film files (about 15 MB MP4
+or 10 MB WebM) and the 480 KB track are fetched after each ENTER, subject
+to the browser's cache.
