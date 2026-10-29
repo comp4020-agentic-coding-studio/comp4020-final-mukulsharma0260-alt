@@ -139,7 +139,13 @@ try {
           m.small.length ? `${m.small.length}/${m.targets} small: ${m.small.slice(0, 6).join("; ")}${m.small.length > 6 ? "; …" : ""}` : `${m.targets} targets, all ≥ 44px`);
 
         // The conversation opens as a full-screen sheet on a phone.
-        await page.click("#chat-toggle");
+        // On a phone the conversation is reached through the Menu.
+        if (await page.isVisible("#menu-toggle")) {
+          await page.click("#menu-toggle");
+          await page.click('#menu-sheet [data-menu="chat"]');
+        } else {
+          await page.click("#chat-toggle");
+        }
         await page.waitForTimeout(400);
         const sheet = await page.evaluate(() => {
           const r = document.getElementById("chat-panel")!.getBoundingClientRect();

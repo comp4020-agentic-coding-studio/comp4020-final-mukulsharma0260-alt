@@ -25,6 +25,13 @@ function narrowScreen() {
   return window.matchMedia?.("(max-width: 960px), (max-aspect-ratio: 1/1)")?.matches ?? false;
 }
 
+// The phone layout: at most 600px wide or 500px tall, so a phone held
+// sideways counts too. Must match the stylesheet's phone media query.
+const PHONE_QUERY = "(max-width: 600px), (max-height: 500px)";
+function phoneScreen() {
+  return window.matchMedia?.(PHONE_QUERY)?.matches ?? false;
+}
+
 // A few messages are too long for one line on a phone, where the second line
 // would fall on the stars, so they have a shorter phone version.
 function phoneText(full, short) {
@@ -35,7 +42,8 @@ function phoneText(full, short) {
 // free just below the title (measureInsets), so they never cover a star, a
 // constellation's name or the dock. Wider screens place them with CSS alone.
 function placeStatus() {
-  if (!narrowScreen()) {
+  // On a phone the stylesheet puts announcements in the quiet line's slot.
+  if (!narrowScreen() || phoneScreen()) {
     statusEl.style.removeProperty("top");
     return;
   }
@@ -182,6 +190,18 @@ function measureInsets() {
   const dock = document.querySelector(".dock")?.getBoundingClientRect?.();
   const narrow = window.matchMedia?.("(max-width: 960px), (max-aspect-ratio: 1/1)")?.matches ?? false;
   const pad = 0.035;
+  // On a phone the field runs from under the place chooser and its quiet
+  // line down to the dock; the title block is not shown there.
+  if (phoneScreen() && dock?.width) {
+    const line = document.getElementById("phone-line")?.getBoundingClientRect?.();
+    const top = line?.height ? line.bottom : rect.top;
+    return {
+      l: pad,
+      r: pad,
+      t: Math.min(0.4, Math.max(0, (top - rect.top) / rect.height) + pad),
+      b: Math.min(0.5, Math.max(0, (rect.bottom - dock.top) / rect.height) + pad),
+    };
+  }
   if (!hero || !dock || !hero.width || !dock.width) return narrow ? INSETS.narrow : INSETS.wide;
   if (narrow) {
     return {
@@ -437,11 +457,35 @@ function renderChrome() {
   if (liveTotal) liveLine.removeAttribute("data-quiet");
   else liveLine.setAttribute("data-quiet", "");
 
+  renderPhoneChrome(inRoom ? name : "Common Room", traceTotal);
+
   svg?.setAttribute("aria-label", inRoom
     ? `${name}. Every point of light is a real visitor's star in ${name}: bright points are studying now, faint points are past traces.`
     : "The Common Room. Every point of light is a real visitor's star: bright points are studying now, faint points are past traces.");
 
   renderDock();
+}
+
+// The phone's header chip, place chooser and quiet line, from the same real
+// counts as the rest of the chrome.
+function renderPhoneChrome(placeName, traceTotal) {
+  const total = liveIds.size;
+  const chip = setText("phone-status", total ? `${total} studying` : "Nobody studying");
+  if (chip) {
+    if (total) chip.removeAttribute("data-quiet");
+    else chip.setAttribute("data-quiet", "");
+  }
+  setText("place-toggle-name", placeName);
+  setText("phone-line", `${placeName} · ${traceText(traceTotal)}`);
+  for (const a of document.querySelectorAll("#place-sheet a.sheet-row")) {
+    const id = a.dataset.view;
+    const n = id === "common" ? total : liveBy[id] ?? 0;
+    if (id === view) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+    const count = a.querySelector(".sheet-row-count");
+    const words = n ? `${n} studying` : "Quiet";
+    if (count && count.textContent !== words) count.textContent = words;
+  }
 }
 
 function renderDock() {
@@ -1119,15 +1163,20 @@ function refreshChatForView() {
   renderChatComposer();
 }
 
-function openChat(open) {
+// Focus goes back to whatever opened the drawer: the Chat button, or on a
+// phone the Menu that led to it.
+let chatOpener = null;
+function openChat(open, opener) {
   if (!chatPanel || !chatToggle) return;
+  const wasOpen = !chatPanel.hidden;
   chatPanel.hidden = !open;
   chatToggle.setAttribute("aria-expanded", String(open));
   if (open) {
+    chatOpener = opener ?? chatToggle;
     refreshChatForView();
     (hasCallsign() ? chatInput : document.getElementById("callsign-input"))?.focus();
-  } else {
-    chatToggle.focus();
+  } else if (wasOpen) {
+    (chatOpener ?? chatToggle).focus();
   }
 }
 
@@ -1271,14 +1320,17 @@ function playBreak() {
   breakAudio.play()?.catch?.(() => announceError("That track could not play. Please try again."));
 }
 
-function openBreak(open) {
+let breakOpener = null;
+function openBreak(open, opener) {
+  const wasOpen = !breakPanel.hidden;
   breakPanel.hidden = !open;
   breakToggle.setAttribute("aria-expanded", String(open));
   if (open) {
+    breakOpener = opener ?? breakToggle;
     renderBreak();
     (breakModes.find((b) => b.dataset.mode === breakMode) ?? breakPlay)?.focus();
-  } else {
-    breakToggle.focus();
+  } else if (wasOpen) {
+    (breakOpener ?? breakToggle).focus();
   }
 }
 
@@ -1330,6 +1382,95 @@ function wireBreak() {
 }
 
 // ---- Traces -----------------------------------------------------------------
+// ---- Phone sheets ----------------------------------------------------------
+// On a phone the Menu and the place chooser open as sheets. One is open at a
+// time; focus moves into it and stays there, and Escape or Close returns
+// focus to the control that opened it.
+const menuToggle = document.getElementById("menu-toggle");
+const placeToggle = document.getElementById("place-toggle");
+let openSheetEl = null;
+let sheetOpener = null;
+
+function focusablesIn(el) {
+  return [...el.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])")]
+    .filter((x) => !x.hidden && !x.closest("[hidden]"));
+}
+
+function openSheet(sheet, opener) {
+  if (!sheet) return;
+  if (openSheetEl && openSheetEl !== sheet) closeSheet({ restore: false });
+  openSheetEl = sheet;
+  sheetOpener = opener;
+  sheet.hidden = false;
+  opener?.setAttribute("aria-expanded", "true");
+  const current = sheet.querySelector('[aria-current="page"]');
+  (current ?? focusablesIn(sheet).find((x) => !x.hasAttribute("data-close-sheet")) ?? focusablesIn(sheet)[0])?.focus();
+}
+
+function closeSheet({ restore = true } = {}) {
+  if (!openSheetEl) return;
+  openSheetEl.hidden = true;
+  sheetOpener?.setAttribute("aria-expanded", "false");
+  const opener = sheetOpener;
+  openSheetEl = null;
+  sheetOpener = null;
+  if (restore) opener?.focus();
+}
+
+// The container keyboard focus must stay in, if any: an open sheet, or on a
+// phone, the full-screen conversation or Break.
+function focusTrap() {
+  if (openSheetEl) return openSheetEl;
+  if (!phoneScreen()) return null;
+  if (chatPanel && !chatPanel.hidden) return chatPanel;
+  if (breakPanel && !breakPanel.hidden) return breakPanel;
+  return null;
+}
+
+function trapTab(e) {
+  const trap = focusTrap();
+  if (!trap) return;
+  const items = focusablesIn(trap);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey && (active === first || !trap.contains(active))) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (active === last || !trap.contains(active))) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+function wireSheets() {
+  menuToggle?.addEventListener("click", () => {
+    if (openSheetEl) closeSheet();
+    else openSheet(document.getElementById("menu-sheet"), menuToggle);
+  });
+  placeToggle?.addEventListener("click", () => {
+    if (openSheetEl) closeSheet();
+    else openSheet(document.getElementById("place-sheet"), placeToggle);
+  });
+  for (const btn of document.querySelectorAll("[data-close-sheet]")) btn.addEventListener("click", () => closeSheet());
+  // Each Menu row does what its desktop control does; a drawer it opens
+  // hands focus back to the Menu when it closes.
+  for (const row of document.querySelectorAll("#menu-sheet [data-menu]")) {
+    row.addEventListener("click", () => {
+      closeSheet({ restore: false });
+      if (row.dataset.menu === "chat") openChat(true, menuToggle);
+      else if (row.dataset.menu === "break") openBreak(true, menuToggle);
+      else if (row.dataset.menu === "replay") replayArrival();
+    });
+  }
+  // A place row changes view through the same link handler as the top bar;
+  // this only closes the chooser and hands focus back to it.
+  document.getElementById("place-sheet")?.addEventListener("click", (e) => {
+    if (e.target.closest?.("a.sheet-row")) closeSheet();
+  });
+}
+
 function wireTraces() {
   const toggle = document.getElementById("traces-toggle");
   toggle?.addEventListener("click", () => {
@@ -1627,6 +1768,7 @@ function enterLounge() {
 // (ADR 0006), and Enter plays the film again.
 function replayArrival() {
   if (!skyActive || filming) return;
+  closeSheet({ restore: false });
   openChat(false);
   openBreak(false);
   if (breakPlaying()) breakAudio.pause();
@@ -1677,6 +1819,7 @@ function activateSky() {
   wireTraces();
   wireCallsign();
   wireChat();
+  wireSheets();
   renderChatComposer();
 
   // Every link to a view changes view in place; the address bar follows.
@@ -1718,9 +1861,14 @@ function activateSky() {
       }
       return;
     }
+    if (e.key === "Tab" && skyActive) {
+      trapTab(e);
+      return;
+    }
     // On the arrival screen only Enter enters: Escape does nothing there.
     if (e.key !== "Escape" || !skyActive) return;
-    if (chatPanel && !chatPanel.hidden) openChat(false);
+    if (openSheetEl) closeSheet();
+    else if (chatPanel && !chatPanel.hidden) openChat(false);
     else if (breakPanel && !breakPanel.hidden) openBreak(false);
     else if (picked) setPicked(false);
   });

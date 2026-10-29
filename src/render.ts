@@ -199,6 +199,15 @@ export function renderHomePage(
     }),
   ].join("\n        ");
 
+  // The phone's place chooser: the same six views as the top bar, each with
+  // its count, in a sheet.
+  const studying = (n: number) => (n ? `${n} studying` : "Quiet");
+  const placeRows = [
+    `<li><a class="sheet-row" href="#" data-view="common" aria-current="page"><span class="sheet-row-name">Common Room</span><span class="sheet-row-count">${studying(glowingTotal)}</span></a></li>`,
+    ...CONSTELLATIONS.map((id) =>
+      `<li><a class="sheet-row" href="#${SLUG[id]}" data-view="${id}"><span class="sheet-row-name">${escapeHtml(CONSTELLATION_INFO[id].name)}</span><span class="sheet-row-count">${studying(liveIn(id))}</span></a></li>`),
+  ].join("\n        ");
+
   const breakModes = BREAK_MODES.map((m, i) => `<li><button type="button" class="break-mode" data-mode="${m.id}" data-src="${m.src}" aria-pressed="${i === 0}">
             <span class="break-mode-name">${escapeHtml(m.name)}</span>
             <span class="break-mode-line">${escapeHtml(m.line)}</span>
@@ -1124,6 +1133,129 @@ export function renderHomePage(
     .legend { display: none; }
     #dock-note { display: none; }
   }
+
+  /* ---- Phone controls ---------------------------------------------------
+     In the page at every size, shown only on a phone (below). */
+  .phone-status, .menu-toggle, .place-toggle, .phone-line { display: none; }
+  .sheet {
+    position: absolute;
+    z-index: 8;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    box-sizing: border-box;
+    max-height: 85%;
+    overflow-y: auto;
+    padding: var(--space-3) var(--gutter) calc(var(--space-4) + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--color-line);
+    border-radius: var(--radius-2) var(--radius-2) 0 0;
+    background: var(--color-surface-strong);
+    -webkit-backdrop-filter: blur(20px) saturate(1.15);
+    backdrop-filter: blur(20px) saturate(1.15);
+    box-shadow: var(--elev-2);
+  }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; }
+  .sheet-title { margin: 0; color: var(--color-ink); font: 400 var(--text-lg)/1.2 var(--font-display); }
+  .sheet-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-1); }
+  .sheet-row {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    min-height: 3rem;
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--radius-1);
+    background: transparent;
+    color: var(--color-ink);
+    font: 500 var(--text-md)/1.2 var(--font-ui);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .sheet-row:hover { background: rgba(244, 238, 226, 0.06); }
+  .sheet-row[aria-current="page"] { background: rgba(244, 238, 226, 0.1); box-shadow: inset 0 0 0 1px var(--color-line-strong); }
+  .sheet-row .tool-icon { flex: none; color: var(--color-ink-soft); }
+  .sheet-row-name { flex: 1; }
+  .sheet-row-count { color: var(--color-ink-muted); font: 500 var(--text-sm)/1 var(--font-ui); }
+  .sheet-row[aria-current="page"] .sheet-row-count { color: var(--color-ink-soft); }
+
+  /* ---- Phones -----------------------------------------------------------
+     At most 600px wide or 500px tall, so a phone held sideways counts too.
+     One 52px header (the wordmark, a status chip and Menu), one place
+     chooser, and the field filling the rest of the dynamic viewport down
+     to the dock. The title block gives way to one quiet line. */
+  @media (max-width: 600px), (max-height: 500px) {
+    #sky-app { --gutter: 1rem; --topbar-h: calc(3.25rem + env(safe-area-inset-top)); --chooser-h: 2.75rem; height: 100dvh; bottom: auto; }
+    .topbar { flex-wrap: nowrap; height: var(--topbar-h); padding: env(safe-area-inset-top) max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left)); gap: var(--space-2); background: rgba(3, 4, 14, 0.82); }
+    .wordmark { font-size: 1.25rem; }
+    .wordmark-sub, .lounge-nav, .tools { display: none; }
+    .phone-status {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin: 0 0 0 auto !important;
+      color: var(--color-ink-soft);
+      font: 500 var(--text-xs)/1 var(--font-ui);
+      white-space: nowrap;
+    }
+    .phone-status::before { content: ""; width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--color-live); box-shadow: var(--glow-live); }
+    .phone-status[data-quiet]::before { background: transparent; box-shadow: inset 0 0 0 1px var(--color-ink-muted); }
+    .menu-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: var(--target);
+      min-height: var(--target);
+      padding: 0 var(--space-4);
+      border: 1px solid var(--color-line);
+      border-radius: var(--radius-pill);
+      background: rgba(10, 12, 30, 0.45);
+      color: var(--color-ink);
+      font: 500 var(--text-sm)/1 var(--font-ui);
+      cursor: pointer;
+    }
+    .menu-toggle[aria-expanded="true"] { color: var(--color-gold); border-color: rgba(233, 196, 126, 0.55); }
+    .place-toggle {
+      position: absolute;
+      z-index: 5;
+      top: var(--topbar-h);
+      left: max(var(--gutter), env(safe-area-inset-left));
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      min-height: var(--chooser-h);
+      padding: 0 var(--space-3);
+      margin-left: calc(-1 * var(--space-3));
+      border: 0;
+      border-radius: var(--radius-1);
+      background: transparent;
+      color: var(--color-ink);
+      font: 500 var(--text-md)/1 var(--font-ui);
+      text-shadow: 0 1px 8px rgba(2, 3, 10, 0.9);
+      cursor: pointer;
+    }
+    .place-caret { color: var(--color-ink-muted); font-size: var(--text-sm); }
+    .phone-line {
+      position: absolute;
+      z-index: 4;
+      top: calc(var(--topbar-h) + var(--chooser-h));
+      left: max(var(--gutter), env(safe-area-inset-left));
+      right: var(--gutter);
+      display: block;
+      color: var(--color-ink-muted);
+      font: 500 var(--text-xs)/1.5 var(--font-ui);
+      text-shadow: 0 1px 8px rgba(2, 3, 10, 0.9);
+      pointer-events: none;
+    }
+    .hero { display: none; }
+    #stage { top: var(--topbar-h); bottom: env(safe-area-inset-bottom); }
+    /* Announcements take the quiet line's slot, one line, never over the
+       field's names or the dock. */
+    #status { top: calc(var(--topbar-h) + var(--chooser-h)) !important; left: max(var(--gutter), env(safe-area-inset-left)); right: var(--gutter); text-align: left; font-size: var(--text-xs); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: rgba(3, 4, 14, 0.82); }
+    #status.visible ~ .phone-line { visibility: hidden; }
+  }
 </style>
 </head>
 <body data-view="common" data-has-star="${ownStar ? "true" : "false"}" data-own-star="${ownStar ? escapeAttr(ownStar.id) : ""}" data-constellation="${ownArea ?? ""}" data-has-callsign="${ownCallsign ? "true" : "false"}" data-callsign="${ownCallsign ? escapeAttr(ownCallsign) : ""}" data-regions="${escapeAttr(JSON.stringify(REGIONS))}" data-constellations="${escapeAttr(JSON.stringify(info))}" data-insets="${escapeAttr(JSON.stringify(INSETS))}">
@@ -1192,7 +1324,11 @@ export function renderHomePage(
       </button>
       <a class="about-link" href="/readme/" aria-label="About Overlap"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 24a96 96 0 1 1 0 192 96 96 0 0 1 0-192zm0 24a72 72 0 1 0 0 144 72 72 0 0 0 0-144zm-12 60h24v64h-24zm12-40a14 14 0 1 1 0 28 14 14 0 0 1 0-28z"></path></svg><span class="about-label">About</span></a>
     </div>
+    <p id="phone-status" class="phone-status"${glowingTotal ? "" : ` data-quiet=""`}>${glowingTotal ? `${glowingTotal} studying` : "Nobody studying"}</p>
+    <button type="button" id="menu-toggle" class="menu-toggle" aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet">Menu</button>
   </header>
+
+  <button type="button" id="place-toggle" class="place-toggle" aria-haspopup="dialog" aria-expanded="false" aria-controls="place-sheet"><span id="place-toggle-name">Common Room</span><span class="place-caret" aria-hidden="true">▾</span></button>
 
   <div id="stage" class="still" data-view="common">
     <svg id="sky" viewBox="0 0 ${FIRST_PAINT_WIDTH} ${FRAME_HEIGHT}" preserveAspectRatio="xMidYMid slice" role="group" aria-label="The Common Room. Every point of light is a real visitor's star: bright points are studying now, faint points are past traces.">
@@ -1217,6 +1353,7 @@ export function renderHomePage(
   </section>
 
   <div id="status" role="status" aria-live="polite"></div>
+  <p id="phone-line" class="phone-line" aria-hidden="true">Common Room · ${traceText(stars.length)}</p>
 
   <section class="dock" aria-label="Your star">
     <div class="dock-row">
@@ -1253,6 +1390,29 @@ export function renderHomePage(
       <li class="legend-toggle"><button type="button" id="traces-toggle" class="chip-button" aria-pressed="true">Past traces</button></li>
     </ul>
   </section>
+
+  <div id="menu-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="menu-title" hidden>
+    <div class="sheet-head">
+      <h2 id="menu-title" class="sheet-title">Menu</h2>
+      <button type="button" class="icon-close" data-close-sheet aria-label="Close the menu"><span aria-hidden="true">×</span></button>
+    </div>
+    <ul class="sheet-list">
+      <li><button type="button" class="sheet-row" data-menu="chat"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M30 60a20 20 0 0 1 20-20h140a20 20 0 0 1 20 20v90a20 20 0 0 1-20 20H110l-45 35v-35H50a20 20 0 0 1-20-20z"></path></svg><span class="sheet-row-name">Conversation</span></button></li>
+      <li><button type="button" class="sheet-row" data-menu="break"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M96 44v112a28 28 0 1 1-16-25V70l112-26v96a28 28 0 1 1-16-25V64z"></path></svg><span class="sheet-row-name">Break</span></button></li>
+      <li><button type="button" class="sheet-row" data-menu="replay"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 40a80 80 0 1 1-75.4 53.3l22.6 8A56 56 0 1 0 120 64v28L72 52l48-40z"></path></svg><span class="sheet-row-name">Replay arrival</span></button></li>
+      <li><a class="sheet-row" href="/readme/"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 24a96 96 0 1 1 0 192 96 96 0 0 1 0-192zm0 24a72 72 0 1 0 0 144 72 72 0 0 0 0-144zm-12 60h24v64h-24zm12-40a14 14 0 1 1 0 28 14 14 0 0 1 0-28z"></path></svg><span class="sheet-row-name">About</span></a></li>
+    </ul>
+  </div>
+
+  <div id="place-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="place-title" hidden>
+    <div class="sheet-head">
+      <h2 id="place-title" class="sheet-title">Places in the lounge</h2>
+      <button type="button" class="icon-close" data-close-sheet aria-label="Close places"><span aria-hidden="true">×</span></button>
+    </div>
+    <ul class="sheet-list">
+        ${placeRows}
+    </ul>
+  </div>
 
   <section id="chat-panel" class="chat-panel" aria-labelledby="chat-title" hidden>
     <div class="chat-head">
