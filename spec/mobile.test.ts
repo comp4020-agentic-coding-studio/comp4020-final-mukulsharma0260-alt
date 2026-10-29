@@ -473,3 +473,25 @@ it("on a phone the names stay 12px with tighter spacing, and the outlines are qu
   // 12px is the floor: the phone rule never shrinks the names below it.
   expect(phone).not.toMatch(/\.region-name\s*\{[^}]*font-size:\s*(0\.[0-6]\d*rem|1[01]px)/);
 });
+
+// ---- Touch and contrast checks from the review ------------------------------
+it("on a phone every tappable control shows a pressed state, since a tap never fires :hover", async () => {
+  const sheet = await css();
+  const phone = sheet.slice(sheet.indexOf(`@media ${PHONE}`));
+  for (const sel of [".menu-toggle", ".place-toggle", ".sheet-row", ".dock-summary"]) {
+    // The selector may be qualified (e.g. by :not(...)) before :active.
+    expect(phone).toMatch(new RegExp(`\\${sel}(:not\\([^)]*\\))?:active`));
+  }
+});
+
+it("the phone's quiet line and the field's counts use the softer ink, for AA contrast over the lightest tint", async () => {
+  const sheet = await css();
+  const phone = sheet.slice(sheet.indexOf(`@media ${PHONE}`));
+  expect(phone).toMatch(/\.phone-line\s*\{[^}]*color:\s*var\(--color-ink-soft\)/);
+  expect(phone).toMatch(/\.region-live\s*\{[^}]*color:\s*var\(--color-ink-soft\)/);
+});
+
+it("sheet rows are at least 8px apart", async () => {
+  const sheet = await css();
+  expect(sheet).toMatch(/\.sheet-list\s*\{[^}]*gap:\s*var\(--space-2\)/);
+});

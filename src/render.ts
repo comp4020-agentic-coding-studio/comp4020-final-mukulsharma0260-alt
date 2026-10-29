@@ -1160,7 +1160,7 @@ export function renderHomePage(
   }
   .sheet-head { display: flex; align-items: center; justify-content: space-between; }
   .sheet-title { margin: 0; color: var(--color-ink); font: 400 var(--text-lg)/1.2 var(--font-display); }
-  .sheet-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-1); }
+  .sheet-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-2); }
   .sheet-row {
     box-sizing: border-box;
     display: flex;
@@ -1248,7 +1248,7 @@ export function renderHomePage(
       left: max(var(--gutter), env(safe-area-inset-left));
       right: var(--gutter);
       display: block;
-      color: var(--color-ink-muted);
+      color: var(--color-ink-soft);
       font: 500 var(--text-xs)/1.5 var(--font-ui);
       text-shadow: 0 1px 8px rgba(2, 3, 10, 0.9);
       pointer-events: none;
@@ -1317,6 +1317,13 @@ export function renderHomePage(
     .region-name { letter-spacing: 0.06em; }
     .fig-edge { stroke: rgba(196, 200, 230, 0.09); }
     .fig-node { stroke: rgba(196, 200, 230, 0.2); }
+    /* Small words over the field use the softer ink: the muted one falls
+       just under AA where a view's lightest tint sits behind it. */
+    .region-live { color: var(--color-ink-soft); }
+
+    /* A tap never fires :hover, so each control shows it was pressed. */
+    .menu-toggle:active, .place-toggle:active, .sheet-row:active, .dock-summary:not([data-action]):active { background: rgba(244, 238, 226, 0.1); }
+    .dock-summary[data-action]:active { background: #ffffff; }
   }
   .phone-only { display: none; }
   @media (max-width: 600px), (max-height: 500px) {
