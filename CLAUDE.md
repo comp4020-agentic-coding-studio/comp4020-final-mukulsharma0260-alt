@@ -52,3 +52,5 @@ A star's constellation lives only on the star in SQLite, set by its own cookie t
 The arrival artwork is a picture. Inside the lounge, every point of light is a visitor.
 
 The lounge backdrop is the arrival galaxy blurred until no point of light remains.
+
+A phone is at most 600px wide or 500px tall (landscape phones included); the stylesheet and `PHONE_QUERY` in sky.js use that one query. On a phone the lounge has a 52px header (wordmark, status chip, Menu), a place chooser, no heading block, a field of at least 60% of the screen, a dock that collapses to one row, the callsign step inside the conversation, and full-screen sheets that keep focus inside. Any layout change reruns `scripts/check-mobile.ts` against a local throwaway server and adds its table to `docs/evidence/mobile-check.md`; a failing row is explained, never deleted.

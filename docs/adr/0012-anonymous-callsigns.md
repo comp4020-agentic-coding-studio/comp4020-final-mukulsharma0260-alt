@@ -339,3 +339,30 @@ visitors live — are built now.
   privacy property depends on how often it runs, including the degenerate
   case of it never running (the read-path filter alone is already
   sufficient for guarantee 1).
+
+## Amendment: where the callsign is asked for on a phone (30 October 2026)
+
+Nothing about the callsign itself changes: the same 3-16 character rule,
+the same server-side check, the same `POST /api/callsign`, owned by the
+browser identity and never released. What changes is where a phone asks
+for it.
+
+- **Wider screens** keep the callsign step in the dock, and the composer
+  stays disabled until a callsign exists.
+- **Phones** (at most 600px wide or 500px tall) move the same step into
+  the conversation. The composer is usable at once; the callsign form
+  appears only when a visitor without a callsign first tries to send, and
+  the message waits and is sent once the callsign is saved. On a phone the
+  dock had grown to 374-402px with the form in it, covering most of the
+  field; asking at the moment a callsign is needed keeps the dock small and
+  ties the request to its reason.
+- The button that saves a callsign says **Save callsign** everywhere. It
+  used to say "Enter the Lounge", which promised entry to a place the
+  visitor was already in.
+- The callsign step remains one self-contained panel (`#callsign-panel`)
+  that sky.js moves between the two places, so it can be moved or removed
+  later without touching the conversation.
+
+Posting rules are unchanged and still re-checked by the server on every
+post: a usable phone composer is a way to reach the callsign form, not
+permission to post.

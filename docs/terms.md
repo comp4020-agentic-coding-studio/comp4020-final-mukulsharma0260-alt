@@ -3,7 +3,8 @@
 Everything a visitor reads uses these words, and only in these senses.
 
 - **lounge** (The Lounge): the whole anonymous shared place, the product
-  itself. Its top bar is the same in every view.
+  itself. Its top bar is the same in every view; on a phone it is a short
+  header with the place chooser beneath it.
 - **Common Room**: the default view inside the lounge, one full-screen field
   where every real star is shown. It is where a visitor arrives after the
   film. It is the one place called a room. It has a conversation, but it is
@@ -37,6 +38,17 @@ Everything a visitor reads uses these words, and only in these senses.
 - **Chat**: the top bar's label for the button that opens the conversation
   drawer, and only that. The drawer itself names a conversation, never a
   "chat room".
+- **Menu**: on a phone, the one header button that opens a sheet holding
+  Conversation, Break, Replay arrival and About. "Conversation" is its row
+  for the conversation; a phone never shows the word "Chat".
+- **place chooser** ("Common Room ▾"): on a phone, the line under the
+  header naming the current view; it opens "Places in the lounge", the
+  Common Room and the five constellations, each with "N studying" or
+  "Quiet". It names places, never "rooms" for constellations.
+- **"N studying"**: the phone's short form of "N studying now", in the
+  header chip and the place chooser. It counts the same glowing stars.
+- **Save callsign**: the button that saves a callsign, on every screen
+  (ADR 0012).
 
 Words never used for the place: server, channel, sky (as a name), check-in,
 profile, followers. "Sky" may describe the picture, never name the place.
