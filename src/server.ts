@@ -39,7 +39,7 @@ import { IdempotencyCache, RateLimiter, isValidIdempotencyKey } from "./message-
 import { renderHomePage } from "./render.ts";
 import { renderAboutPage } from "./about.ts";
 import { clampToRegion, settlePosition, spotInRegion } from "./regions.ts";
-import { DOC_ASSETS, DOC_ASSET_HEADERS, renderReadmePage } from "./readme.ts";
+import { DOC_ASSETS, renderReadmePage } from "./readme.ts";
 import { oldLight } from "./brightness.ts";
 import { ANONYMOUS, audit, starActor, type Room } from "./audit.ts";
 import { BREAK_MODES, isBreakMode, type BreakMode } from "./break.ts";
@@ -846,8 +846,9 @@ const server = createServer(async (req, res) => {
     } else if (req.method === "GET" && path === "/readme/") {
       sendHtml(res, 200, renderReadmePage());
     } else if (req.method === "GET" && DOC_ASSETS.has(path)) {
-      res.writeHead(200, DOC_ASSET_HEADERS);
-      res.end(DOC_ASSETS.get(path));
+      const asset = DOC_ASSETS.get(path)!;
+      res.writeHead(200, asset.headers);
+      res.end(asset.body);
     } else if (req.method === "GET" && path === "/about/") {
       // A page to read: no cookie is read or set and nothing is logged.
       sendHtml(res, 200, renderAboutPage());

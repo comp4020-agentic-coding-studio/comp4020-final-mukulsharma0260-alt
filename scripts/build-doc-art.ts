@@ -5,7 +5,7 @@
 // diamonds, never star dots, because inside the lounge every point of light
 // is a visitor. Run with `node scripts/build-doc-art.ts`; the output is
 // committed, so neither GitHub nor /readme/ runs this.
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { CONSTELLATION_INFO } from "../src/render.ts";
 import { CONSTELLATIONS } from "../src/db.ts";
 
@@ -116,7 +116,7 @@ banner({
   eyebrow: "OVERLAP · AN ANONYMOUS STUDY LOUNGE",
   headline: "Less alone",
   accent: ", late.",
-  lede: "See others studying too. Say nothing, prove nothing.",
+  lede: "Without being asked to say or prove anything.",
   size: 92,
 });
 
@@ -224,4 +224,5 @@ badge("sqlite", "storage", "node:sqlite", C.violet);
 badge("sse", "live", "server-sent events", C.violet);
 badge("js", "client", "vanilla JS", C.violet);
 badge("fly", "deploy", "one Fly.io machine", C.gold);
-badge("adr", "decisions", "12 ADRs", C.gold);
+const adrs = readdirSync(new URL("../docs/adr/", import.meta.url)).filter((f) => /^\d{4}-.*\.md$/.test(f)).length;
+badge("adr", "decisions", `${adrs} ADRs`, C.gold);

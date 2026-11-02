@@ -9,35 +9,45 @@
 import { readFileSync } from "node:fs";
 import { renderMarkdownDocument } from "./markdown.ts";
 
-// The documentation artwork, served from an explicit allowlist rather than a
-// directory. README.md links them as docs/assets/<name>.svg, which GitHub
+// The documentation images, served from an explicit allowlist rather than a
+// directory. README.md links them as docs/assets/<name>, which GitHub
 // resolves from the repo root and a browser on /readme/ resolves to
-// /readme/docs/assets/<name>.svg, so one relative path works in both places.
-const DOC_ASSET_NAMES = [
-  "overlap-banner.svg",
-  "overlap-footer.svg",
-  "process-banner.svg",
-  "process-timeline.svg",
-  "badge-node.svg",
-  "badge-sqlite.svg",
-  "badge-sse.svg",
-  "badge-js.svg",
-  "badge-fly.svg",
-  "badge-adr.svg",
-] as const;
-
-export const DOC_ASSETS: ReadonlyMap<string, Buffer> = new Map(
-  DOC_ASSET_NAMES.map((name) => [`/readme/docs/assets/${name}`, readFileSync(new URL(`../docs/assets/${name}`, import.meta.url))]),
-);
-
-// An SVG opened on its own is a document; this keeps it from running script
-// or loading anything, whatever it contains.
-export const DOC_ASSET_HEADERS = {
-  "Content-Type": "image/svg+xml",
-  "X-Content-Type-Options": "nosniff",
-  "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-  "Cache-Control": "public, max-age=3600",
+// /readme/docs/assets/<name>, so one relative path works in both places.
+const DOC_ASSET_TYPES: Record<string, string> = {
+  "overlap-banner.svg": "image/svg+xml",
+  "overlap-footer.svg": "image/svg+xml",
+  "process-banner.svg": "image/svg+xml",
+  "process-timeline.svg": "image/svg+xml",
+  "badge-node.svg": "image/svg+xml",
+  "badge-sqlite.svg": "image/svg+xml",
+  "badge-sse.svg": "image/svg+xml",
+  "badge-js.svg": "image/svg+xml",
+  "badge-fly.svg": "image/svg+xml",
+  "badge-adr.svg": "image/svg+xml",
+  "lounge-local-synthetic.jpg": "image/jpeg",
 };
+
+export interface DocAsset {
+  body: Buffer;
+  headers: Record<string, string>;
+}
+
+// An SVG opened on its own is a document; the policy keeps it from running
+// script or loading anything, whatever it contains.
+export const DOC_ASSETS: ReadonlyMap<string, DocAsset> = new Map(
+  Object.entries(DOC_ASSET_TYPES).map(([name, type]) => [
+    `/readme/docs/assets/${name}`,
+    {
+      body: readFileSync(new URL(`../docs/assets/${name}`, import.meta.url)),
+      headers: {
+        "Content-Type": type,
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "Cache-Control": "public, max-age=3600",
+      },
+    },
+  ]),
+);
 
 const REPO = "https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt";
 
@@ -105,6 +115,7 @@ const STYLE = `
   .doc p[align="center"], .doc div[align="center"] { text-align: center; }
   .doc img { max-width: 100%; height: auto; vertical-align: middle; }
   .doc p[align="center"] img { margin: 0.15rem 0.1rem; }
+  .doc a:has(> img) { display: inline-block; border-radius: 6px; }
   .doc picture img, .doc > p:first-of-type img { display: block; width: 100%; border-radius: 18px; box-shadow: 0 30px 80px -30px rgba(99, 102, 241, 0.45); }
   .doc hr { border: 0; height: 1px; margin: 2.5rem 0; background: linear-gradient(90deg, transparent, var(--line-strong), transparent); }
   .doc hr + h2 { border-top: 0; padding-top: 0; }
@@ -122,6 +133,8 @@ const STYLE = `
   .doc th, .doc td { padding: 0.7rem 0.9rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
   .doc th { color: var(--muted); font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; background: var(--raised); }
   .doc tr:last-child td { border-bottom: 0; }
+  .doc td code { overflow-wrap: normal; white-space: nowrap; }
+  .doc td:has(code) { width: 1%; }
   .doc details { margin: 1rem 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
   .doc summary { cursor: pointer; padding: 0.85rem 1.1rem; min-height: 2.75rem; color: var(--ink); font-weight: 600; list-style: none; display: flex; gap: 0.6rem; align-items: center; }
   .doc summary::-webkit-details-marker { display: none; }
@@ -151,7 +164,15 @@ const STYLE = `
     .topbar nav { justify-content: flex-start; gap: 0 1rem; font-size: 0.85rem; }
     .doc p[align="center"] img:not([width]) { height: 1.3rem; }
     .doc > p:first-of-type img { border-radius: 12px; }
-    .doc th, .doc td { padding: 0.6rem 0.7rem; }
+    .doc table, .doc tbody, .doc tr, .doc td { display: block; width: auto; }
+    .doc thead { display: none; }
+    .doc tr { padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--line); }
+    .doc tr:last-child { border-bottom: 0; }
+    .doc td { padding: 0; border: 0; }
+    .doc td + td { margin-top: 0.35rem; }
+    .doc td + td::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .doc td code { white-space: normal; overflow-wrap: anywhere; }
+    .doc td:has(code) { width: auto; }
   }
 `;
 
@@ -160,13 +181,20 @@ const STYLE = `
 const SCRIPT = `
 (() => {
   const links = new Map([...document.querySelectorAll('.toc a')].map((a) => [a.getAttribute('href').slice(1), a]));
-  if (!('IntersectionObserver' in window) || links.size === 0) return;
+  if (links.size === 0) return;
+  const mark = (current) => { for (const [id, a] of links) id === current ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current'); };
+  // A jump names its own section, even one too short to reach the top.
+  let pinned = null;
+  const fromHash = () => { const id = decodeURIComponent(location.hash.slice(1)); if (links.has(id)) { pinned = id; mark(id); } };
+  addEventListener('hashchange', fromHash);
+  for (const type of ['wheel', 'touchmove', 'keydown']) addEventListener(type, () => { pinned = null; }, { passive: true });
+  fromHash();
+  if (!('IntersectionObserver' in window)) return;
   const seen = new Set();
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) e.isIntersecting ? seen.add(e.target.id) : seen.delete(e.target.id);
     const first = [...links.keys()].find((id) => seen.has(id));
-    if (!first) return;
-    for (const [id, a] of links) id === first ? a.setAttribute('aria-current', 'true') : a.removeAttribute('aria-current');
+    if (!pinned && first) mark(first);
   }, { rootMargin: '0px 0px -60% 0px' });
   for (const id of links.keys()) { const h = document.getElementById(id); if (h) io.observe(h); }
 })();

@@ -121,6 +121,15 @@ The supplied originals are kept, unshipped, in the gitignored
   figures are lines and hollow diamonds, never star dots.
 - **Licence:** original work for this project.
 
+## README screenshot
+
+- **File:** `docs/assets/lounge-local-synthetic.jpg`, 1280 by 800
+- **Source:** a headless-browser screenshot of the lounge on a local throwaway
+  server and database, taken with Claude Code on 2 November 2026. Fourteen
+  synthetic test browsers placed stars and five kept the lounge open; no
+  visitor and no production data appears. The README caption says so.
+- **Licence:** original work for this project.
+
 ## Shipped files
 
 The page serves only these optimised copies, made from the originals above:

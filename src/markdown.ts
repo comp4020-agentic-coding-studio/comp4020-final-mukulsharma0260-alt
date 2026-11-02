@@ -24,8 +24,10 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-const SAFE_URL = /^(https:\/\/|mailto:|#|\.{0,2}\/|[a-z0-9_-][a-z0-9_./-]*(#[a-z0-9_-]*)?$)/i;
-const safeUrl = (url: string): string | undefined => (SAFE_URL.test(url.trim()) && !/^\s*javascript:/i.test(url) ? url.trim() : undefined);
+// https, mailto, an in-page anchor, or a path on this site. "//host" is
+// refused: it is an off-site link that looks like a relative one.
+const SAFE_URL = /^(https:\/\/|mailto:|#|\.{0,2}\/(?!\/)|[a-z0-9_-][a-z0-9_./-]*(#[a-z0-9_-]*)?$)/i;
+const safeUrl = (url: string): string | undefined => (SAFE_URL.test(url.trim()) ? url.trim() : undefined);
 
 const ALLOWED: Record<string, readonly string[]> = {
   p: ["align"],
@@ -177,7 +179,8 @@ export function renderMarkdownDocument(markdown: string): Rendered {
         rows.push(splitRow(lines[i]!));
         i++;
       }
-      const cell = (tag: string, c: string, k: number) => `<${tag}${align[k] ? ` style="text-align:${align[k]}"` : ""}>${renderInline(c)}</${tag}>`;
+      const label = (k: number) => (tag: string) => (tag === "td" ? ` data-label="${escapeHtml(plain(renderInline(head[k] ?? "")))}"` : "");
+      const cell = (tag: string, c: string, k: number) => `<${tag}${label(k)(tag)}${align[k] ? ` style="text-align:${align[k]}"` : ""}>${renderInline(c)}</${tag}>`;
       html.push(
         `<div class="table-wrap"><table><thead><tr>${head.map((c, k) => cell("th", c, k)).join("")}</tr></thead><tbody>${rows
           .map((r) => `<tr>${head.map((_, k) => cell("td", r[k] ?? "", k)).join("")}</tr>`)

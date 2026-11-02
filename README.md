@@ -20,15 +20,19 @@ Goffman's public co-presence and Erickson and Kellogg's social translucence name
 
 ## How the lounge works
 
+<p align="center"><img src="docs/assets/lounge-local-synthetic.jpg" alt="The Common Room on a local test server: five constellation figures, with five synthetic test browsers glowing." width="100%"></p>
+
+<p align="center"><sub>Local build: every star is a synthetic test browser.</sub></p>
+
 1. Press **Enter the Lounge**; until then nothing counts.
-2. Place one star in the Common Room, or settle it in one of five constellations: Science, Engineering, Business, Health, or Arts & Society. An anonymous cookie, not an account, gives your browser its star back.
+2. Place one star in the Common Room, or settle it in Science, Engineering, Business, Health, or Arts & Society. An anonymous cookie, not an account, gives your browser its star back.
 3. A star glows while its visitor has the lounge open in a visible tab. That says a browser is showing the lounge, not who or where the person is, or whether they are at their desk.
 4. Optionally choose a callsign. It belongs to your browser, not your star, so it can come first. It is unique and permanent, so do not use your real name.
-5. Talk a little in the Common Room, or in your constellation's conversation, which only visitors settled there can read or join. Messages are at most 280 characters and expire after 24 hours.
+5. Talk a little in the Common Room, or in your constellation's conversation, which only visitors settled there can join. Messages are at most 280 characters and expire after 24 hours.
 
 ## What I chose not to build
 
-Overlap began as an artwork about old light; I dropped that because nothing gave a visitor a reason to stay. I rejected a general social space, which pulls towards names, reactions and feeds, and a "study nearby" filter, which would leak where people are. There are no direct messages, profiles, likes, feeds, streaks, permanent chat history, or location.
+Overlap began as an artwork about old light; I dropped it because nothing gave visitors a reason to stay. I rejected a general social space, which pulls towards names, reactions and feeds, and a "study nearby" filter, which would leak where people are. There are no direct messages, profiles, likes, feeds, streaks, permanent chat history, or location.
 
 ## Enforced: each has a check
 
@@ -48,7 +52,7 @@ Whether the lounge feels calm rather than empty, reads at a glance, and feels li
 
 ## Known limits
 
-Overlap runs on one Fly.io machine, with stars in SQLite on its volume and live state in memory; a second machine would see a different lounge. A restart briefly forgets who is glowing; expired messages may survive in backups. There is no account recovery or moderation.
+Overlap runs on one Fly.io machine, with stars in SQLite on its volume and live state in memory; a second machine would see a different lounge. A restart briefly forgets who glows; expired messages may survive in backups. There is no account recovery or moderation.
 
 ## Sources
 

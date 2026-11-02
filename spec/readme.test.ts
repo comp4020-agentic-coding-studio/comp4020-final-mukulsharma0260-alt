@@ -1,5 +1,5 @@
 import { JSDOM } from "jsdom";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { expect, inject, it } from "vitest";
 import { renderMarkdownDocument } from "../src/markdown.ts";
 
@@ -49,6 +49,7 @@ it("drops anything that could run: scripts, handlers, styles and javascript: lin
       '<p align="center" onclick="alert(1)" style="x"><img src="javascript:alert(1)" onerror="alert(1)" alt="x"></p>',
       "[click](javascript:alert(1)) and <a href=\"javascript:alert(1)\">a</a>",
       '<iframe src="https://example.com"></iframe>',
+      "[off-site](//evil.example) [insecure](http://x.example) ![data](data:image/svg+xml;base64,PHN2Zz4=)",
     ].join("\n\n"),
   );
   const d = new JSDOM(html).window.document;
@@ -56,6 +57,7 @@ it("drops anything that could run: scripts, handlers, styles and javascript: lin
   for (const el of d.querySelectorAll("[href], [src]")) {
     expect(el.getAttribute("href") ?? el.getAttribute("src")).not.toMatch(/javascript:/i);
   }
+  expect(d.querySelector('[href^="//"], [href^="http:"], [src^="data:"]')).toBeNull();
   expect(d.body.textContent).toContain("<script>alert(1)</script>");
 });
 
@@ -64,15 +66,22 @@ it("serves every README image from an allowlist, with no script able to run in a
   const srcs = [...md.matchAll(/<img[^>]*\ssrc="([^"]+)"/g)].map((m) => m[1]!);
   expect(srcs.length).toBeGreaterThan(0);
   for (const src of srcs) {
-    expect(src, "README images are repo files, so GitHub and /readme/ both resolve them").toMatch(/^docs\/assets\/[a-z0-9-]+\.svg$/);
+    expect(src, "README images are repo files, so GitHub and /readme/ both resolve them").toMatch(/^docs\/assets\/[a-z0-9-]+\.(svg|jpg)$/);
     const res = await get(new URL(src, new URL("/readme/", baseUrl)).pathname);
     expect(res.status, src).toBe(200);
-    expect(res.headers.get("content-type")).toBe("image/svg+xml");
+    expect(res.headers.get("content-type")).toBe(src.endsWith(".svg") ? "image/svg+xml" : "image/jpeg");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("content-security-policy")).toMatch(/default-src 'none'.*sandbox/);
   }
   expect((await get("/readme/docs/assets/nope.svg")).status).toBe(404);
   expect((await get("/readme/docs/assets/../../../src/server.ts")).status).toBe(404);
+});
+
+it("the README screenshot is captioned as synthetic, never as visitors", () => {
+  const md = readFileSync("README.md", "utf8");
+  const at = md.indexOf("lounge-local-synthetic.jpg");
+  expect(at).toBeGreaterThan(-1);
+  expect(md.slice(at, at + 400)).toMatch(/synthetic test browser/);
 });
 
 it("the documentation artwork is labelled as illustration, never as visitors", () => {
@@ -102,4 +111,24 @@ it("sets no cookie and keeps motion behind a reduced-motion check", async () => 
   expect(res.headers.get("set-cookie")).toBeNull();
   const css = new JSDOM(await res.text()).window.document.querySelector("style")?.textContent ?? "";
   expect(css).toMatch(/prefers-reduced-motion: reduce[^}]*\{[^}]*scroll-behavior: auto/);
+});
+
+it("the ADR badge counts the decision records that exist, so it cannot drift", () => {
+  const adrs = readdirSync("docs/adr").filter((f) => /^\d{4}-.*\.md$/.test(f)).length;
+  const badge = readFileSync("docs/assets/badge-adr.svg", "utf8");
+  expect(badge, "rerun node scripts/build-doc-art.ts after adding an ADR").toContain(`${adrs} ADRs`);
+  for (const doc of ["README.md", "PROCESS.md"]) {
+    expect(readFileSync(doc, "utf8"), doc).toContain(`alt="decisions: ${adrs} ADRs"`);
+  }
+});
+
+it("a contents jump marks its own section, even one too short to reach the top", async () => {
+  const html = await (await get("/readme/")).text();
+  const dom = new JSDOM(html, { url: new URL("/readme/#known-limits", baseUrl).toString(), runScripts: "dangerously" });
+  const current = () => dom.window.document.querySelector(".toc a[aria-current]")?.getAttribute("href");
+  expect(current()).toBe("#known-limits");
+  dom.window.location.hash = "#sources";
+  await new Promise((r) => dom.window.setTimeout(r, 0));
+  expect(current()).toBe("#sources");
+  dom.window.close();
 });
