@@ -330,7 +330,8 @@ export function renderHomePage(
     display: grid;
     place-items: center;
     overflow: hidden;
-    padding: 1.25rem;
+    /* Clear of the notch and the home bar on a phone. */
+    padding: max(1.25rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) max(1.25rem, env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left));
     isolation: isolate;
     /* The galaxy paints with the page, before the picture decodes, so the
        arrival is never a black screen. */
@@ -390,8 +391,9 @@ export function renderHomePage(
     cursor: pointer;
     text-transform: uppercase;
   }
-  /* Only the arrival button sits lower, towards the horizon. */
-  #arrival-submit { transform: translateY(clamp(4rem, 15vh, 8.5rem)); }
+  /* The arrival's one action sits just under the words that explain it,
+     not pushed down towards the horizon on its own. */
+  #arrival-submit { margin-top: 1.75rem; }
   #arrival-submit:hover, .lounge-button:hover { color: #050506; background: #ffffff; border-color: #ffffff; }
   /* Keyboard focus is always visible: a soft ivory ring rather than a hard
      white box, so it reads as part of the scene. */

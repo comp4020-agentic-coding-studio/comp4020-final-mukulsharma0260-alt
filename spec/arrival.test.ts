@@ -183,3 +183,21 @@ it("does not serve the unused warp video or the uncut Luna clip", async () => {
     await res.arrayBuffer();
   }
 });
+
+// ---- The arrival's one action ----------------------------------------------
+it("the arrival has one action, ENTER THE LOUNGE, close under the description and inside the safe area", async () => {
+  const html = await (await fetch(new URL("/", baseUrl))).text();
+  // One button on the arrival, no second film link.
+  const arrival = html.slice(html.indexOf('<section id="arrival"'), html.indexOf('<section id="arrival-film"'));
+  expect([...arrival.matchAll(/<button\b[^>]*id="([^"]+)"/g)].map((m) => m[1])).toEqual(["arrival-submit"]);
+  expect(arrival).not.toMatch(/watch the arrival film/i);
+  const sheet = html.slice(html.indexOf("<style>"), html.indexOf("</style>")).replace(/\/\*[\s\S]*?\*\//g, "");
+  // No push down towards the horizon any more: it sits after the copy.
+  const button = /#arrival-submit\s*\{([^}]*)\}/.exec(sheet)?.[1] ?? "";
+  expect(button).not.toMatch(/translateY/);
+  expect(sheet).toMatch(/#arrival-submit\s*\{[^}]*margin-top:\s*1\.75rem/);
+  // The arrival keeps clear of the notch and the home bar.
+  const arrivalRule = /#arrival\s*\{([^}]*)\}/.exec(sheet)![1]!;
+  expect(arrivalRule).toMatch(/env\(safe-area-inset-bottom\)/);
+  expect(arrivalRule).toMatch(/env\(safe-area-inset-top\)/);
+});
