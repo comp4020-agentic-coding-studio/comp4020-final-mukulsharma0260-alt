@@ -69,3 +69,18 @@ for speed.
 - Film captions sampled every 50 ms in both engines at three sizes: at every
   change of line the old line's opacity was 0.00-0.01, the band stayed one
   height of at most two lines, and never met Skip, Mute or the progress bar.
+
+## Final run (5aee4c2, 2 November 2026, 19:02-19:13, laptop awake)
+
+| Check | Result |
+|---|---|
+| `pnpm check` | 374 of 374 tests, 36.0 s |
+| `pnpm check:evidence` | pass (crit 8-10 reflections; 20 PROCESS.md commits resolve) |
+| `scripts/check-mobile.ts` | 112 of 112 |
+| `scripts/check-views.ts`, 10 runs in a row | 10 of 10, 54 checks each (Chromium and WebKit, 1440x900, 390x844, 844x390) |
+| Size matrix (1440x900, 1280x800, 390x844, 844x390; 10 states; Chromium and WebKit) | 80 of 80 cells: no sideways scroll, no overlapping text, no target under 44px, no unnamed control, no console error |
+
+`check-views.ts` had failed on some runs before 5aee4c2. Logged at the
+moment of failure, each tap on a name had landed 14-19 px from the
+visitor's own star, inside its 44px target, which wins over a name by
+design; the check now taps only where a name can really be reached.
