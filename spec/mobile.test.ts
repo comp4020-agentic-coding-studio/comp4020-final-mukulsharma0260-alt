@@ -495,3 +495,28 @@ it("sheet rows are at least 8px apart", async () => {
   const sheet = await css();
   expect(sheet).toMatch(/\.sheet-list\s*\{[^}]*gap:\s*var\(--space-2\)/);
 });
+
+it("ENTER, the film's Skip and Mute, the top bar's views and Past traces are all at least 44px, on every pointer", async () => {
+  // Outside any media query: a mouse gets the same target as a finger.
+  const sheet = (await css()).replace(/\/\*[\s\S]*?\*\//g, "");
+  // Every rule outside an @media block, wherever it sits in the sheet.
+  let base = "";
+  for (let i = 0, depth = 0, inMedia = false; i < sheet.length; i++) {
+    const c = sheet[i];
+    if (depth === 0 && sheet.startsWith("@media", i)) inMedia = true;
+    if (c === "{") depth++;
+    if (!inMedia) base += c;
+    if (c === "}") {
+      depth--;
+      if (depth === 0 && inMedia) { inMedia = false; continue; }
+    }
+  }
+  const minHeight = (sel: string) => {
+    const rules = [...base.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((m) => m[1]!.split(",").map((s) => s.trim()).includes(sel));
+    const values = rules.map((m) => /min-height:\s*([^;]+);/.exec(m[2]!)?.[1]?.trim()).filter(Boolean);
+    return values[values.length - 1];
+  };
+  for (const sel of ["#arrival-submit", ".film-pill", ".nav-link", ".chip-button"]) {
+    expect([ "var(--target)", "2.75rem", "44px" ], sel).toContain(minHeight(sel));
+  }
+});

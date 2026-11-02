@@ -380,6 +380,7 @@ export function renderHomePage(
   .arrival-copy { max-width: 34rem; margin: 1.25rem auto 0; color: #f2f2f3; font: clamp(0.9rem, 2.5vw, 1.05rem)/1.55 system-ui, sans-serif; }
   /* One button style for the arrival and the lounge. */
   #arrival-submit, .lounge-button {
+    min-height: 2.75rem;
     border: 1px solid #ffffff;
     border-radius: 0.15rem;
     padding: 0.82rem 1.15rem;
@@ -537,7 +538,7 @@ export function renderHomePage(
   .film-pill {
     position: absolute;
     z-index: 2;
-    min-height: 2rem;
+    min-height: 2.75rem;
     border: 1px solid rgba(var(--film-starlight), 0.4);
     border-radius: 999px;
     padding: 0.5rem 0.9rem;
@@ -555,7 +556,7 @@ export function renderHomePage(
   .film-pill:focus-visible { outline: 1.5px solid rgba(var(--film-starlight), 0.9); outline-offset: 3px; }
   /* Fingers need bigger targets than a pointer does. */
   @media (pointer: coarse) {
-    .film-pill { min-height: 2.75rem; padding: 0.75rem 1.1rem; }
+    .film-pill { padding: 0.75rem 1.1rem; }
   }
   #film-sound { top: max(1rem, env(safe-area-inset-top)); right: max(1rem, env(safe-area-inset-right)); }
   #film-skip { bottom: max(1rem, env(safe-area-inset-bottom)); right: max(1rem, env(safe-area-inset-right)); }
@@ -688,7 +689,7 @@ export function renderHomePage(
     position: relative;
     display: inline-flex;
     align-items: center;
-    min-height: 2.5rem;
+    min-height: var(--target);
     padding: 0 var(--space-3);
     border-radius: var(--radius-pill);
     color: var(--color-ink-muted);
@@ -962,9 +963,8 @@ export function renderHomePage(
      a phone. */
   .legend-section > summary { display: none; }
   .dock-summary { display: none; }
-  .chip-button { min-height: 2.25rem; padding: 0 var(--space-3); font-size: var(--text-xs); }
+  .chip-button { min-height: var(--target); padding: 0 var(--space-3); font-size: var(--text-xs); }
   .chip-button[aria-pressed="true"]::before { content: "✓ "; }
-  @media (pointer: coarse) and (min-width: 761px) { .chip-button { min-height: var(--target); } }
 
   /* ---- Chat ----------------------------------------------------------
      A quiet conversation drawer, never a social feed: small on purpose,
@@ -1139,7 +1139,6 @@ export function renderHomePage(
     .wordmark { font-size: 1.25rem; }
     .wordmark-sub { font-size: 0.6875rem; letter-spacing: 0.1em; }
     .legend-toggle { margin-left: 0; }
-    .chip-button { min-height: 2.25rem; }
     .tool-label, .about-label { display: none; }
     .tool-button { padding: 0; justify-content: center; }
     /* About stays reachable on a phone, as an icon among the tools. */
