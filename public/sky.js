@@ -219,9 +219,16 @@ function measureInsets() {
   };
 }
 
+// Set when the stage had no size to measure, so the next time it does (the
+// ResizeObserver below) everything is drawn again at its real shape. A
+// stage with no size never leaves a guessed desktop-sized frame behind.
+let frameStale = false;
+
 function updateFrame() {
   const rect = stage?.getBoundingClientRect?.();
-  const w = rect && rect.width && rect.height ? Math.round((FRAME_HEIGHT * rect.width) / rect.height) : 1600;
+  const sized = Boolean(rect && rect.width && rect.height);
+  frameStale = !sized;
+  const w = sized ? Math.round((FRAME_HEIGHT * rect.width) / rect.height) : frame.w;
   const box = view === "common" ? { x0: 0, y0: 0, x1: 1, y1: 1 } : REGIONS[view] ?? { x0: 0, y0: 0, x1: 1, y1: 1 };
   const inset = measureInsets() ?? INSETS.wide;
   frame = { w, h: FRAME_HEIGHT, box, inset };
@@ -284,7 +291,7 @@ function drawStar(star, mine = ownId()) {
   // Transient states (picked, dragging, arrived) are kept from the current
   // class rather than looked up one by one.
   const was = g.getAttribute("class") ?? "";
-  const keep = ["picked", "dragging", "arrived"].filter((c) => was.includes(` ${c}`)).map((c) => ` ${c}`).join("");
+  const keep = ["picked", "dragging", "arrived", "entering"].filter((c) => was.includes(` ${c}`)).map((c) => ` ${c}`).join("");
   const cls = `star ${level}${own ? " own" : ""}${away ? " away" : ""}${keep}`;
   if (was !== cls) g.setAttribute("class", cls);
   // With a thousand stars every redraw must stay cheap, so attributes are
@@ -484,6 +491,11 @@ function renderChrome() {
 
   renderPhoneChrome(inRoom ? name : "Common Room", traceTotal);
 
+  // A constellation nobody has settled in says so, so an empty field never
+  // looks like a broken one.
+  const empty = document.getElementById("view-empty");
+  if (empty) empty.hidden = !inRoom || [...stars.values()].some((s) => s.constellation === view);
+
   svg?.setAttribute("aria-label", inRoom
     ? `${name}. Every point of light is a real visitor's star in ${name}: bright points are studying now, faint points are past traces.`
     : "The Common Room. Every point of light is a real visitor's star: bright points are studying now, faint points are past traces.");
@@ -618,8 +630,14 @@ function render() {
   renderChrome();
 }
 
-// Re-measure and redraw everything that depends on the stage's shape.
+// Re-measure and redraw everything that depends on the stage's shape. A
+// change of shape is not a journey: stars jump to their new places in the
+// same frame instead of gliding there through the old frame's space.
 function relayout() {
+  const wasStill = stage?.classList.contains("still");
+  stage?.classList.add("still");
+  stage?.classList.remove("flying");
+  if (!wasStill) nextFrame(() => nextFrame(() => stage?.classList.remove("still")));
   updateFrame();
   drawFigures();
   placeDoorways();
@@ -643,6 +661,10 @@ function setView(next, { push = true } = {}) {
       window.history.pushState(null, "", hash || window.location.pathname + window.location.search);
     }
   }
+  // Stars not shown in the old view arrive in place (class "entering"):
+  // they never glide in from beyond the edge, so a view is never empty for
+  // the length of a flight. Stars shown in both views still fly.
+  const wasAway = new Set([...starNodes].filter(([, g]) => g.classList.contains("away")).map(([id]) => id));
   if (changed && skyActive && !reducedMotion) {
     stage?.classList.add("flying");
     clearTimeout(setView.timer);
@@ -650,7 +672,9 @@ function setView(next, { push = true } = {}) {
   }
   setPicked(false);
   updateFrame();
+  for (const id of wasAway) starNodes.get(id)?.classList.add("entering");
   render();
+  if (wasAway.size) nextFrame(() => nextFrame(() => { for (const id of wasAway) starNodes.get(id)?.classList.remove("entering"); }));
   drawFigures();
   placeDoorways();
   if (changed) refreshChatForView();
@@ -2023,6 +2047,22 @@ function activateSky() {
     if (view !== "common") settleIn(view);
   });
   document.getElementById("leave-area")?.addEventListener("click", leaveConstellation);
+
+  // iOS changes the stage's size (toolbars, rotation, dvh) without always
+  // firing a window resize, and the stage has no size at all behind the
+  // arrival; whenever its size changes, or it first gets one, redraw.
+  if (typeof window.ResizeObserver === "function" && stage) {
+    let last = "";
+    new window.ResizeObserver(() => {
+      const r = stage.getBoundingClientRect();
+      const key = `${Math.round(r.width)}x${Math.round(r.height)}`;
+      if (key === last && !frameStale) return;
+      last = key;
+      if (!r.width || !r.height) return;
+      relayout();
+      placeStatus();
+    }).observe(stage);
+  }
 
   let resizePending = false;
   window.addEventListener("resize", () => {

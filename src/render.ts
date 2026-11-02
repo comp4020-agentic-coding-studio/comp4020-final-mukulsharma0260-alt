@@ -743,6 +743,8 @@ export function renderHomePage(
      goes quiet fades from glowing to recent rather than jumping. */
   .star { transition: transform var(--dur-move) var(--ease-calm), opacity var(--dur-calm) var(--ease-calm); }
   #stage.flying .star { transition-duration: var(--dur-fly), var(--dur-calm); }
+  /* A star coming into the view takes its place at once and only fades. */
+  #stage .star.entering { transition: opacity var(--dur-fast) var(--ease-calm); }
   #stage.still .star, #stage.still .star *, .star.dragging { transition: none; }
   .star-core, .star-halo { transition: transform var(--dur-calm) var(--ease-calm), opacity var(--dur-calm) var(--ease-calm), fill var(--dur-calm) var(--ease-calm); }
   .star-halo { fill: url(#halo-warm); }
@@ -867,6 +869,9 @@ export function renderHomePage(
     pointer-events: none;
   }
   #status.visible { opacity: 1; }
+  /* A constellation's view with nobody settled: one calm line at the middle
+     of the field, never over its figure's name. */
+  .view-empty { position: absolute; z-index: 3; top: 58%; left: 0; right: 0; margin: 0 !important; text-align: center; color: var(--color-ink-soft); font-size: var(--text-sm); text-shadow: 0 1px 12px rgba(2, 3, 10, 0.9); pointer-events: none; }
   #status.error { color: #f1c5c5; }
 
   /* A quiet, compact step: chosen once, changed rarely, never a modal or a
@@ -1425,6 +1430,7 @@ export function renderHomePage(
     <p id="live-line" role="status" aria-atomic="true"${glowingTotal ? "" : ` data-quiet=""`}>${liveLine}</p>
   </section>
 
+  <p id="view-empty" class="view-empty" hidden>No stars settled here yet.</p>
   <div id="status" role="status" aria-live="polite"></div>
   <p id="phone-line" class="phone-line" aria-hidden="true">Common Room · ${traceText(stars.length)}</p>
 
