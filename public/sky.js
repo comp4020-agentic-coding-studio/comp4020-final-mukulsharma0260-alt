@@ -679,7 +679,7 @@ function wireDock() {
   dockSummary?.addEventListener("click", () => {
     if (dockSummary.dataset.action === "place") {
       if (view !== "common") settleIn(view);
-      else placeStar();
+      else placeStarFree();
       return;
     }
     setDockExpanded(dockEl.dataset.expanded !== "true");
@@ -1009,12 +1009,38 @@ function clearOfNames(clientX, clientY) {
   return { clientX, clientY };
 }
 
+// The random source for a first star's spot, in one place so a test can
+// seed it.
+function randomUnit() {
+  return Math.random();
+}
+
+// A first star placed by the button, not a tap, still lands somewhere a
+// tap can reach: a random point of the visible field, moved clear of every
+// constellation's name, sent as fractions. Null when the stage cannot be
+// measured, and the server picks the spot.
+function freeSpot() {
+  const r = stage?.getBoundingClientRect?.();
+  if (!r || !r.width || !r.height) return null;
+  const { l, r: right, t, b } = frame.inset;
+  const clientX = r.left + r.width * (l + (1 - l - right) * randomUnit());
+  const clientY = r.top + r.height * (t + (1 - t - b) * randomUnit());
+  const clear = clearOfNames(clientX, clientY);
+  return toStagePoint(clear.clientX, clear.clientY);
+}
+
+// "Place your star", from the dock or its phone summary: a first star in
+// the Common Room, at a free spot.
+function placeStarFree() {
+  const spot = freeSpot();
+  return spot ? placeStar(spot.x, spot.y) : placeStar();
+}
+
 function wireStage() {
   const own = () => starNodes.get(ownId());
   // Set after a drag, so the click that follows it is not taken as opening
   // whatever lies under the pointer.
   let swallowClick = false;
-  let pressOnName = false;
   let lastPoint = null;
 
   // Capture phase, so the star is found before a name on top of it acts.
@@ -1025,7 +1051,6 @@ function wireStage() {
     swallowClick = false;
     const g = own();
     if (!g || !(g.contains(e.target) || onOwnStar(e.clientX, e.clientY))) return;
-    pressOnName = Boolean(e.target.closest?.("a.region"));
     e.preventDefault();
     window.getSelection?.()?.removeAllRanges?.();
     dragging = true;
@@ -1068,9 +1093,11 @@ function wireStage() {
     const [sx, sy] = (g?.dataset.dragStart ?? "0,0").split(",").map(Number);
     const end = e?.clientX !== undefined ? { clientX: e.clientX, clientY: e.clientY } : lastPoint ?? { clientX: sx, clientY: sy };
     const moved = Math.hypot(end.clientX - sx, end.clientY - sy) > 4;
-    // The press belonged to the star: the click after a drag, or after any
-    // press that landed on a name, must not open that constellation.
-    swallowClick = moved || pressOnName;
+    // The press belonged to the star, so the click after it, which the
+    // browser may deliver to a name on top, must neither open that
+    // constellation nor be taken as a tap-to-move that drops the pick. If
+    // no click comes (WebKit, after a touch press), the next press clears it.
+    swallowClick = true;
     if (!moved) {
       // A tap on your star selects it for tap-to-move.
       setPicked(!picked);
@@ -2128,7 +2155,7 @@ function activateSky() {
       setView(a.dataset.view === "common" ? null : a.dataset.view);
     });
   }
-  document.getElementById("place-star")?.addEventListener("click", () => placeStar());
+  document.getElementById("place-star")?.addEventListener("click", placeStarFree);
   document.getElementById("settle-action")?.addEventListener("click", () => {
     if (view !== "common") settleIn(view);
   });

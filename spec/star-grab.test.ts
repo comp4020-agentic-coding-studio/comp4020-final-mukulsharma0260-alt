@@ -203,3 +203,76 @@ it("tap the star, then tap the field: the star moves there, even in a browser th
     p.close();
   }
 });
+
+it("a tap on the star where a name lies on top picks the star, and the click that follows neither opens the name nor drops the pick", async () => {
+  const p = await open();
+  try {
+    // Press the star's centre; the browser's click then lands on the name on top.
+    p.pointer("pointerdown", p.own, 500, 205);
+    p.pointer("pointerup", p.stage, 500, 205);
+    expect(p.own.classList.contains("picked")).toBe(true);
+    const click = p.pointer("click", p.name, 500, 205);
+    expect(click.defaultPrevented).toBe(true);
+    expect(p.doc.body.dataset.view).toBe("common");
+    expect(p.own.classList.contains("picked")).toBe(true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(p.posts).toEqual([]);
+  } finally {
+    p.close();
+  }
+});
+
+// ---- Placing a star never puts it under a name --------------------------------
+it("Place your star, with a random spot that lands on a name, sends a spot clear of every name, as fractions", async () => {
+  const p = await open();
+  try {
+    // A visitor with no star yet.
+    p.doc.body.dataset.hasStar = "false";
+    p.doc.body.dataset.ownStar = "";
+    const sent: Array<{ x: number; y: number }> = [];
+    (p.window as unknown as { fetch: (u: string, i?: { method?: string; body?: string }) => Promise<unknown> }).fetch = async (url, init) => {
+      if (url === "/api/star" && init?.method === "POST") sent.push(JSON.parse(init.body!));
+      return { ok: true, json: async () => ({ star: { id: "new", x: 0.5, y: 0.5, constellation: null } }) };
+    };
+    // Seed the random spot to the middle of Engineering's name (430..570, 180..230).
+    const seq = [0.5, 0.205];
+    (p.window as unknown as { randomUnit: () => number }).randomUnit = () => seq.shift() ?? 0.5;
+    p.doc.getElementById("place-star")!.dispatchEvent(new p.window.MouseEvent("click", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sent).toHaveLength(1);
+    const { x, y } = sent[0]!;
+    expect(x >= 0 && x <= 1 && y >= 0 && y <= 1).toBe(true);
+    const px = x * 1000, py = y * 1000;
+    expect(px > 430 && px < 570 && py > 180 && py < 230, `sent ${px},${py}`).toBe(false);
+  } finally {
+    p.close();
+  }
+});
+
+it("the phone dock's Place your star takes a free spot too", async () => {
+  const p = await open();
+  try {
+    p.doc.body.dataset.hasStar = "false";
+    p.doc.body.dataset.ownStar = "";
+    p.window.eval("renderDock()");
+    const sent: Array<{ x: number; y: number }> = [];
+    (p.window as unknown as { fetch: (u: string, i?: { method?: string; body?: string }) => Promise<unknown> }).fetch = async (url, init) => {
+      if (url === "/api/star" && init?.method === "POST") sent.push(JSON.parse(init.body!));
+      return { ok: true, json: async () => ({ star: { id: "new", x: 0.5, y: 0.5, constellation: null } }) };
+    };
+    const seq = [0.5, 0.205];
+    (p.window as unknown as { randomUnit: () => number }).randomUnit = () => seq.shift() ?? 0.5;
+    const summary = p.doc.getElementById("dock-summary")!;
+    expect(summary.dataset.action).toBe("place");
+    summary.dispatchEvent(new p.window.MouseEvent("click", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sent).toHaveLength(1);
+    // A spot is chosen and sent: fractions, not left for the server to pick.
+    expect(typeof sent[0]!.x).toBe("number");
+    expect(typeof sent[0]!.y).toBe("number");
+    const px = sent[0]!.x * 1000, py = sent[0]!.y * 1000;
+    expect(px > 430 && px < 570 && py > 180 && py < 230, `sent ${px},${py}`).toBe(false);
+  } finally {
+    p.close();
+  }
+});
