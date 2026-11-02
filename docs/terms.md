@@ -57,10 +57,11 @@ Everything a visitor reads uses these words, and only in these senses.
   same list.
 
 - **About**: the lounge's link to the About page at `/about/`, a short
-  story of what the lounge is for, ending in "ENTER THE LOUNGE". It is a page
-  to read: opening it never enters the lounge or makes a star glow. The
-  plain README stays at `/readme/`, linked from the About page as "Read the
-  technical notes".
+  story of what the lounge is for, read one thought at a time as the visitor
+  scrolls, ending in a quiet "Return to the lounge". Its header says "Back to
+  lounge". It is a page to read: opening it never enters the lounge or makes
+  a star glow. The full README stays at `/readme/`, linked from the About
+  page as "Read the technical notes".
 
 Words never used for the place: server, channel, sky (as a name), check-in,
 profile, followers. "Sky" may describe the picture, never name the place.
