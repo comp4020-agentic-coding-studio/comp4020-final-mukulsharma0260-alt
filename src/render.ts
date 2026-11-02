@@ -204,8 +204,14 @@ export function renderHomePage(
   const studying = (n: number) => (n ? `${n} studying` : "Quiet");
   const placeRows = [
     `<li><a class="sheet-row" href="#" data-view="common" aria-current="page"><span class="sheet-row-name">Common Room</span><span class="sheet-row-count">${studying(glowingTotal)}</span></a></li>`,
-    ...CONSTELLATIONS.map((id) =>
-      `<li><a class="sheet-row" href="#${SLUG[id]}" data-view="${id}"><span class="sheet-row-name">${escapeHtml(CONSTELLATION_INFO[id].name)}</span><span class="sheet-row-count">${studying(liveIn(id))}</span></a></li>`),
+    // Each constellation's row opens it, and beside it, an explicit button
+    // settles the visitor's star there (sky.js shows it only when that would
+    // change something). Looking never moves a star; only this does.
+    ...CONSTELLATIONS.map((id) => {
+      const name = escapeHtml(CONSTELLATION_INFO[id].name);
+      return `<li class="place-row"><a class="sheet-row" href="#${SLUG[id]}" data-view="${id}"><span class="sheet-row-name">${name}</span><span class="sheet-row-count">${studying(liveIn(id))}</span></a><button type="button" class="settle-button" data-settle="${id}" aria-label="Settle my star in ${name}" hidden>Settle here</button></li>`;
+    }),
+    `<li class="place-row" data-leave-row hidden><button type="button" class="sheet-row leave-row" data-leave></button></li>`,
   ].join("\n        ");
 
   const breakModes = BREAK_MODES.map((m, i) => `<li><button type="button" class="break-mode" data-mode="${m.id}" data-src="${m.src}" aria-pressed="${i === 0}">
@@ -1195,6 +1201,29 @@ export function renderHomePage(
   .sheet-row-name { flex: 1; }
   .sheet-row-count { color: var(--color-ink-muted); font: 500 var(--text-sm)/1 var(--font-ui); }
   .sheet-row[aria-current="page"] .sheet-row-count { color: var(--color-ink-soft); }
+  /* A constellation's row: the link that opens it, and beside it the one
+     button that settles your star there. */
+  .place-row { display: flex; align-items: center; gap: var(--space-2); }
+  .place-row > .sheet-row { flex: 1; min-width: 0; }
+  .settle-button {
+    flex: none;
+    min-height: var(--target);
+    padding: 0 var(--space-4);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--color-ink);
+    font: 500 var(--text-sm)/1 var(--font-ui);
+    cursor: pointer;
+  }
+  .settle-button:hover { border-color: var(--color-ink-soft); }
+  .settle-button:active { background: rgba(244, 238, 226, 0.1); }
+  .leave-row { color: var(--color-ink-soft); }
+  /* On wider screens the place sheet is a compact panel at the side, like
+     the conversation and Break, not a sheet across the whole width. */
+  @media (min-width: 601px) and (min-height: 501px) {
+    #place-sheet { left: auto; right: var(--gutter); top: calc(var(--topbar-h) + var(--space-2)); bottom: auto; width: min(26rem, calc(100% - 2 * var(--gutter))); max-height: calc(100% - var(--topbar-h) - var(--space-6)); border: 1px solid var(--color-line); border-radius: var(--radius-2); padding-bottom: var(--space-4); }
+  }
 
   /* ---- Phones -----------------------------------------------------------
      At most 600px wide or 500px tall, so a phone held sideways counts too.
@@ -1336,10 +1365,6 @@ export function renderHomePage(
     .menu-toggle:active, .place-toggle:active, .sheet-row:active, .dock-summary:not([data-action]):active { background: rgba(244, 238, 226, 0.1); }
     .dock-summary[data-action]:active { background: #ffffff; }
   }
-  .phone-only { display: none; }
-  @media (max-width: 600px), (max-height: 500px) {
-    .dock-actions .phone-only:not([hidden]) { display: inline-flex; align-items: center; justify-content: center; }
-  }
 </style>
 </head>
 <body data-view="common" data-has-star="${ownStar ? "true" : "false"}" data-own-star="${ownStar ? escapeAttr(ownStar.id) : ""}" data-constellation="${ownArea ?? ""}" data-has-callsign="${ownCallsign ? "true" : "false"}" data-callsign="${ownCallsign ? escapeAttr(ownCallsign) : ""}" data-regions="${escapeAttr(JSON.stringify(REGIONS))}" data-constellations="${escapeAttr(JSON.stringify(info))}" data-insets="${escapeAttr(JSON.stringify(INSETS))}">
@@ -1454,7 +1479,7 @@ export function renderHomePage(
         <button type="button" id="place-star" class="lounge-button"${ownStar ? " hidden" : ""}>Place your star</button>
         <button type="button" id="settle-action" class="lounge-button" hidden></button>
         <button type="button" id="leave-area" class="quiet-button" hidden></button>
-        <button type="button" id="study-in" class="quiet-button phone-only" hidden>Study in a constellation…</button>
+        <button type="button" id="study-in" class="quiet-button" hidden>Study in a constellation…</button>
       </div>
     </div>
     <div id="callsign-panel" class="callsign-panel">

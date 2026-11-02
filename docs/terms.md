@@ -49,6 +49,12 @@ Everything a visitor reads uses these words, and only in these senses.
   header chip and the place chooser. It counts the same glowing stars.
 - **Save callsign**: the button that saves a callsign, on every screen
   (ADR 0012).
+- **Settle here** / **Settle my star in X**: the one explicit action that
+  moves a visitor's star into constellation X, beside X in "Places in the
+  lounge" ("Settle here" is its visible word, "Settle my star in X" its
+  name). Opening a constellation's view never moves a star. **Leave X**
+  returns it to the Common Room. "Study in a constellation…" opens the
+  same list.
 
 Words never used for the place: server, channel, sky (as a name), check-in,
 profile, followers. "Sky" may describe the picture, never name the place.

@@ -110,7 +110,12 @@ it("a constellation with no stars settled says so plainly, not a blank field", a
   try {
     p.setStage(1440, 800);
     p.fireResize();
-    p.window.eval('setView("health")');
+    // The suite shares one database, so pick a constellation that really
+    // has nobody settled in it, from the page's own stars.
+    const settled = new Set([...p.doc.querySelectorAll("#stars .star[data-constellation]")].map((g) => g.getAttribute("data-constellation")));
+    const quiet = ["health", "business", "arts", "engineering"].find((a) => !settled.has(a));
+    expect(quiet, "every constellation already has a settled star").toBeDefined();
+    p.window.eval(`setView("${quiet}")`);
     const empty = p.doc.getElementById("view-empty")!;
     expect(empty.hidden).toBe(false);
     expect((empty.textContent ?? "").trim()).toBe("No stars settled here yet.");

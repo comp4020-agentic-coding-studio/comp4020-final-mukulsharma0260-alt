@@ -573,8 +573,66 @@ function renderDock() {
   // On a phone the expanded dock offers the way into a constellation.
   const studyIn = document.getElementById("study-in");
   if (studyIn) studyIn.hidden = !hasStar() || inRoom || Boolean(area);
+  renderSettleChoices();
   setText("dock-note", note);
   renderDockSummary(glowing);
+}
+
+// ---- Settling from the place sheet ------------------------------------------
+// One explicit action moves the star: "Settle my star in X" beside each
+// constellation, and "Leave X" for the one it is in. The server decides from
+// the cookie; a second press while one is on its way sends nothing.
+let settling = false;
+
+function renderSettleChoices() {
+  const area = ownArea();
+  for (const b of document.querySelectorAll("#place-sheet [data-settle]")) {
+    b.hidden = !hasStar() || b.dataset.settle === area;
+    b.disabled = settling;
+  }
+  const leaveRow = document.querySelector("#place-sheet [data-leave-row]");
+  const leave = document.querySelector("#place-sheet [data-leave]");
+  if (leaveRow && leave) {
+    leaveRow.hidden = !area;
+    leave.disabled = settling;
+    const words = area ? `Leave ${INFO[area]?.name ?? ""}` : "";
+    if (leave.textContent !== words) leave.textContent = words;
+  }
+}
+
+async function settleFromSheet(area) {
+  if (settling) return;
+  settling = true;
+  renderSettleChoices();
+  closeSheet({ restore: false });
+  try {
+    if (area) {
+      if (await chooseConstellation({ constellation: area })) {
+        setView(area);
+        announce(`Your star is in ${INFO[area]?.name} now.`);
+        starNodes.get(ownId())?.focus();
+      }
+    } else {
+      const was = ownArea();
+      if (await chooseConstellation({ leave: true })) {
+        setView(null);
+        announce(was ? `Your star left ${INFO[was]?.name}. It is in the Common Room.` : "Your star is in the Common Room.");
+        starNodes.get(ownId())?.focus();
+      }
+    }
+  } finally {
+    settling = false;
+    renderSettleChoices();
+  }
+}
+
+function wireSettle() {
+  const sheet = document.getElementById("place-sheet");
+  sheet?.addEventListener("click", (e) => {
+    const settle = e.target.closest?.("[data-settle]");
+    if (settle) settleFromSheet(settle.dataset.settle);
+    else if (e.target.closest?.("[data-leave]")) settleFromSheet(null);
+  });
 }
 
 // ---- The phone dock ------------------------------------------------------
@@ -611,9 +669,12 @@ function setDockExpanded(open, { restore = false } = {}) {
 
 function wireDock() {
   setDockExpanded(false);
-  document.getElementById("study-in")?.addEventListener("click", () => {
+  const studyIn = document.getElementById("study-in");
+  studyIn?.addEventListener("click", () => {
     setDockExpanded(false);
-    openSheet(document.getElementById("place-sheet"), placeToggle);
+    // On a phone focus returns to the chooser (the dock has folded away);
+    // on wider screens, to this button.
+    openSheet(document.getElementById("place-sheet"), phoneScreen() ? placeToggle : studyIn);
   });
   dockSummary?.addEventListener("click", () => {
     if (dockSummary.dataset.action === "place") {
@@ -2048,6 +2109,7 @@ function activateSky() {
   wireChat();
   wireSheets();
   wireDock();
+  wireSettle();
   placeCallsignPanel();
   renderChatComposer();
 
