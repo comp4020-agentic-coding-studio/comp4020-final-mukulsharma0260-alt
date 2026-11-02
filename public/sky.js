@@ -1961,12 +1961,19 @@ function showFilmLine(index) {
   filmLine.textContent = FILM_LINES[index % FILM_LINES.length];
 }
 
+// One caption at a time: the line fades right out (350 ms in the
+// stylesheet), and only then, a frame later, does its text change and fade
+// back in. Changing it as the fade ended let the new line show over the
+// old one.
+const LINE_FADE_MS = 350;
+const LINE_SWAP_MS = LINE_FADE_MS + 50;
+
 function swapFilmLine(index) {
   filmLine.classList.add("fading");
   filmTimers.push(setTimeout(() => {
     showFilmLine(index);
     filmLine.classList.remove("fading");
-  }, 600));
+  }, LINE_SWAP_MS));
 }
 
 function startFilmWords() {

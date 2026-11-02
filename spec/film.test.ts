@@ -626,3 +626,62 @@ it("every media file the server can serve is credited in docs/credits.md", async
     await res.arrayBuffer();
   }
 });
+
+// ---- One caption at a time -----------------------------------------------
+// The swap used to happen exactly as the 600 ms fade ended, so the new line
+// could appear while the old was still visible. Now the line fades out in
+// at most 400 ms, the text changes only once that fade is over, and then it
+// fades back in.
+it("a caption's text never changes while it is visible: it fades out first, then changes, then fades in", async () => {
+  // The stylesheet's own fade-out time: the text may only change once that
+  // whole fade is over, plus a frame for the browser to paint it.
+  const html = await (await fetch(new URL("/", baseUrl))).text();
+  const fadeMs = Number(/#film-line\s*\{[^}]*transition:\s*opacity\s+(\d+)ms/.exec(html)![1]);
+  const f = await loadFilm();
+  try {
+    f.enter();
+    const line = f.doc.getElementById("film-line")!;
+    // When the line went fully faded, and for each text change, how long it
+    // had been faded at that exact moment (-1: it was showing).
+    let fadedSince: number | null = null;
+    let now = 0;
+    const changes: Array<{ at: number; fadedFor: number }> = [];
+    new f.window.MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === "attributes") {
+          const fading = line.classList.contains("fading");
+          if (fading && fadedSince === null) fadedSince = now;
+          if (!fading) fadedSince = null;
+        } else {
+          changes.push({ at: now, fadedFor: fadedSince === null ? -1 : now - fadedSince });
+        }
+      }
+    }).observe(line, { attributes: true, attributeFilter: ["class"], childList: true, characterData: true, subtree: true });
+    for (let t = 0; t < 30_000; t += 10) {
+      await vi.advanceTimersByTimeAsync(10);
+      now += 10;
+    }
+    expect(changes.length).toBeGreaterThanOrEqual(5);
+    for (const c of changes) {
+      expect(c.fadedFor, `change at ${c.at}ms`).toBeGreaterThanOrEqual(fadeMs + 16);
+    }
+  } finally {
+    f.close();
+  }
+});
+
+const FADE_OUT_MS = 350;
+
+it("the caption fades out in at most 400 ms and sits in a fixed band of two lines", async () => {
+  const html = await (await fetch(new URL("/", baseUrl))).text();
+  const sheet = html.slice(html.indexOf("<style>"), html.indexOf("</style>"));
+  const rule = /#film-line\s*\{([^}]*)\}/.exec(sheet)![1]!;
+  const fade = /transition:\s*opacity\s+(\d+)ms/.exec(rule);
+  expect(fade, "the caption's opacity transition").not.toBeNull();
+  expect(Number(fade![1])).toBeLessThanOrEqual(400);
+  expect(Number(fade![1])).toBe(FADE_OUT_MS);
+  // A fixed height (not a minimum) of two lines, clipped beyond them.
+  expect(rule).toMatch(/(^|[^-])height:\s*2\.7em/);
+  expect(rule).toMatch(/overflow:\s*hidden/);
+  expect(rule).not.toMatch(/min-height/);
+});

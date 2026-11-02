@@ -501,17 +501,22 @@ export function renderHomePage(
     text-align: center;
     text-shadow: 0 1px 2px rgba(var(--film-ink), 0.9), 0 2px 24px rgba(var(--film-ink), 0.85);
   }
+  /* One caption at a time, in a band of exactly two lines that never grows
+     into the frame above it. A soft shade behind it keeps it readable over
+     the bright parts of the film without boxing it. */
   #film-line {
-    min-height: 2.7em;
+    height: 2.7em;
+    overflow: hidden;
     max-width: 30rem;
     margin: 0 auto 1.4rem;
     display: grid;
     align-items: end;
+    background: radial-gradient(ellipse 70% 90% at 50% 60%, rgba(var(--film-ink), 0.45), transparent 75%);
     font: italic 400 clamp(1.15rem, 2.7vw, 1.6rem)/1.35 "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
     letter-spacing: 0.005em;
     color: rgb(var(--film-starlight));
     opacity: 1;
-    transition: opacity 600ms ease;
+    transition: opacity 350ms ease;
   }
   #film-line.fading { opacity: 0; }
   .film-progress { width: min(100%, 17rem); margin: 0 auto; }
