@@ -47,6 +47,29 @@ const state = (p: Page, area: string) => p.evaluate((area) => new Promise<{ view
   });
 }))), area);
 
+// A point inside a name where a tap really reaches it: the name is on top
+// there, and it is outside the own star's 44px target, which wins over a
+// name (scripts are told this, not left to chance). Throws if the name has
+// no such point.
+type Tappable = { evaluate: <T, A>(fn: (a: A) => T, a: A) => Promise<T> };
+async function tappablePoint(p: Tappable, area: string) {
+  const pt = await p.evaluate((area: string) => {
+    const a = document.querySelector<HTMLElement>(`#regions a.region[data-region="${area}"]`)!;
+    const r = a.getBoundingClientRect();
+    const core = document.querySelector("#stars .star.own .star-core")?.getBoundingClientRect();
+    const cx = core ? core.left + core.width / 2 : -1e6, cy = core ? core.top + core.height / 2 : -1e6;
+    const ys = [0.5, 0.3, 0.7, 0.15, 0.85], xs = [0.5, 0.3, 0.7, 0.15, 0.85, 0.05, 0.95];
+    for (const fy of ys) for (const fx of xs) {
+      const x = r.left + r.width * fx, y = r.top + r.height * fy;
+      if (Math.hypot(x - cx, y - cy) <= 24) continue;
+      if (document.elementFromPoint(x, y)?.closest("a.region") === a) return { x, y };
+    }
+    return null;
+  }, area);
+  if (!pt) throw new Error(`check-views: the ${area} name has no point a tap can reach (all under the own star's target or covered)`);
+  return pt;
+}
+
 const verdict = (s: Awaited<ReturnType<typeof state>>, area: string) =>
   s.view === area && s.figure && s.drawn === s.expected && s.ownIn !== false;
 const describe = (s: Awaited<ReturnType<typeof state>>) =>
@@ -63,14 +86,17 @@ for (const engine of ["chromium", "webkit"]) {
       await ctx.request.post(B + "api/star", { data: {} });
       await ctx.request.post(B + "api/star/constellation", { data: { constellation: "science" } });
       const other = await browser.newContext();
-      await other.request.post(B + "api/star", { data: {} });
+      const otherId: string = (await (await other.request.post(B + "api/star", { data: {} })).json()).star.id;
       await other.request.post(B + "api/star/constellation", { data: { constellation: "engineering" } });
       await other.close();
 
       const page = await ctx.newPage();
-      // Wait until the live stream has brought the other browser's settled
-      // star, so a view switch is judged on current state.
-      const settledIn = (area: string) => page.waitForFunction((a: string) => document.querySelectorAll(`#stars .star[data-constellation="${a}"]`).length > 0, area, { timeout: 5000 });
+      // Wait until this page knows the other browser's star is settled in
+      // Engineering (from its first snapshot or the live stream), so a view
+      // switch is judged on current state. By id: the database is shared
+      // across sizes and engines, so "any Engineering star" can be an older
+      // one and would not wait at all.
+      const otherSettled = () => page.waitForFunction((id: string) => document.querySelector(`#stars .star[data-id="${id}"]`)?.getAttribute("data-constellation") === "engineering", otherId, { timeout: 5000 });
       const enter = async () => { await page.click("#arrival-submit"); await page.click("#film-skip"); await page.waitForTimeout(700); };
       const home = async () => { await page.evaluate(() => (window as unknown as { setView: (v: null) => void }).setView(null)); await page.waitForTimeout(50); };
 
@@ -80,14 +106,16 @@ for (const engine of ["chromium", "webkit"]) {
       report(engine, size, "direct #science", verdict(s, "science"), describe(s));
 
       await home();
-      await settledIn("engineering");
+      await otherSettled();
       if (phone) { await page.click("#place-toggle"); await page.click('#place-sheet a.sheet-row[data-view="engineering"]'); }
       else await page.click('.lounge-nav a[data-view="engineering"]');
       s = await state(page, "engineering");
       report(engine, size, phone ? "place chooser" : "top bar", verdict(s, "engineering"), describe(s));
 
       await home();
-      await page.click('#regions a.region[data-region="science"]');
+      const at = await tappablePoint(page, "science");
+      if (phone) await page.touchscreen.tap(at.x, at.y);
+      else await page.mouse.click(at.x, at.y);
       s = await state(page, "science");
       report(engine, size, "name in the field", verdict(s, "science"), describe(s));
 
@@ -104,6 +132,40 @@ for (const engine of ["chromium", "webkit"]) {
       s = await state(page, "science");
       report(engine, size, "rotate", verdict(s, "science"), describe(s));
       await ctx.close();
+
+      // Deliberately: the own star over a name. A press on the star picks
+      // the star up and never opens the constellation; the name is still
+      // reachable from the rest of its box, the top bar and the chooser.
+      {
+        const c2 = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: phone });
+        await c2.request.post(B + "api/star", { data: {} });
+        const p2 = await c2.newPage();
+        await p2.goto(B); await p2.click("#arrival-submit"); await p2.click("#film-skip"); await p2.waitForTimeout(700);
+        const star = await p2.evaluate(() => {
+          const w = window as unknown as { toStagePoint: (x: number, y: number) => { x: number; y: number }; moveOwnLocally: (x: number, y: number) => void };
+          const r = document.querySelector('#regions a.region[data-region="engineering"]')!.getBoundingClientRect();
+          const q = w.toStagePoint(r.left + r.width / 2, r.top + r.height / 2);
+          w.moveOwnLocally(q.x, q.y);
+          const core = document.querySelector("#stars .star.own .star-core")!.getBoundingClientRect();
+          return { x: core.left + core.width / 2, y: core.top + core.height / 2 };
+        });
+        if (phone) await p2.touchscreen.tap(star.x, star.y); else await p2.mouse.click(star.x, star.y);
+        await p2.waitForTimeout(150);
+        const picked = await p2.evaluate(() => ({ view: document.body.dataset.view, picked: document.querySelector("#stars .star.own")!.classList.contains("picked") }));
+        report(engine, size, "star over a name: press picks the star", picked.view === "common" && picked.picked, `view=${picked.view} picked=${picked.picked}`);
+        await p2.keyboard.press("Escape");
+        await p2.evaluate(() => (window as unknown as { setPicked: (on: boolean) => void }).setPicked(false));
+        const elsewhere = await tappablePoint(p2, "engineering");
+        if (phone) await p2.touchscreen.tap(elsewhere.x, elsewhere.y); else await p2.mouse.click(elsewhere.x, elsewhere.y);
+        let s2 = await state(p2, "engineering");
+        report(engine, size, "star over a name: rest of the name opens it", s2.view === "engineering", `view=${s2.view}`);
+        await p2.evaluate(() => (window as unknown as { setView: (v: null) => void }).setView(null));
+        if (phone) { await p2.click("#place-toggle"); await p2.click('#place-sheet a.sheet-row[data-view="engineering"]'); }
+        else await p2.click('.lounge-nav a[data-view="engineering"]');
+        s2 = await state(p2, "engineering");
+        report(engine, size, `star over a name: ${phone ? "chooser" : "top bar"} opens it`, s2.view === "engineering", `view=${s2.view}`);
+        await c2.close();
+      }
     }
   } finally {
     await browser.close();
