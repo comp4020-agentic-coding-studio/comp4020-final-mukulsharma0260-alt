@@ -140,3 +140,66 @@ it("Tab reaches the own star and arrow keys still move it", async () => {
     p.close();
   }
 });
+
+// ---- Text selection --------------------------------------------------------
+it("a press on open field is default-prevented, so dragging there never starts a text selection", async () => {
+  const p = await open();
+  try {
+    const field = p.doc.getElementById("sky")!;
+    const down = p.pointer("pointerdown", field, 800, 800);
+    expect(down.defaultPrevented).toBe(true);
+    // An existing selection is cleared when a map gesture starts.
+    let cleared = 0;
+    p.window.getSelection = (() => ({ removeAllRanges: () => { cleared++; }, toString: () => "" })) as unknown as typeof p.window.getSelection;
+    p.pointer("pointerdown", field, 700, 700);
+    expect(cleared).toBe(1);
+  } finally {
+    p.close();
+  }
+});
+
+it("presses on forms, buttons and links outside the field are left alone", async () => {
+  const p = await open();
+  try {
+    for (const sel of ["#chat-input", "#callsign-input", "#chat-toggle", ".about-link"]) {
+      const el = p.doc.querySelector(sel)!;
+      const down = p.pointer("pointerdown", el, 10, 10);
+      expect(down.defaultPrevented, sel).toBe(false);
+    }
+  } finally {
+    p.close();
+  }
+});
+
+it("the stage, its names and its figures can never be selected as text, and only the field blocks touch scrolling", async () => {
+  const html = await (await fetch(new URL("/", baseUrl))).text();
+  // Comments are dropped so a rule's selector is read on its own.
+  const sheet = html.slice(html.indexOf("<style>"), html.indexOf("</style>")).replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/#stage\s*\{[^}]*-webkit-user-select:\s*none[^}]*user-select:\s*none/);
+  expect(sheet).toMatch(/#stage\s*\{[^}]*touch-action:\s*none/);
+  // Nothing else turns off touch scrolling.
+  const blockers = [...sheet.matchAll(/([^{}]+)\{[^}]*touch-action:\s*none/g)].map((m) => m[1]!.trim());
+  expect(blockers).toEqual(["#stage"]);
+  // The page as a whole stays selectable: /readme/, forms and messages.
+  expect(sheet).not.toMatch(/(^|\n)\s*(html|body|#sky-app)\s*\{[^}]*user-select:\s*none/);
+});
+
+it("tap the star, then tap the field: the star moves there, even in a browser that sends no click after the first tap", async () => {
+  const p = await open();
+  try {
+    // A tap on the star (WebKit sends no click after a prevented touch press).
+    p.pointer("pointerdown", p.own, 500, 200);
+    p.pointer("pointerup", p.stage, 500, 200);
+    expect(p.own.classList.contains("picked")).toBe(true);
+    // Then a tap on open field: press, release, click.
+    const field = p.doc.getElementById("sky")!;
+    p.pointer("pointerdown", field, 800, 700);
+    p.pointer("pointerup", field, 800, 700);
+    const click = p.pointer("click", field, 800, 700);
+    expect(click.defaultPrevented).toBe(false);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(p.posts.map((m) => [Math.round(m.body.x * 1000), Math.round(m.body.y * 1000)])).toEqual([[800, 700]]);
+  } finally {
+    p.close();
+  }
+});

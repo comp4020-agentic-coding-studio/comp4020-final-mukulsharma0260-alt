@@ -953,12 +953,18 @@ function wireStage() {
   // Set after a drag, so the click that follows it is not taken as opening
   // whatever lies under the pointer.
   let swallowClick = false;
+  let pressOnName = false;
   let lastPoint = null;
 
   // Capture phase, so the star is found before a name on top of it acts.
   stage.addEventListener("pointerdown", (e) => {
+    // A swallow is only ever for the click of the gesture that armed it; a
+    // browser that sends no click (WebKit, after a prevented touch press)
+    // must not let it eat the next one.
+    swallowClick = false;
     const g = own();
     if (!g || !(g.contains(e.target) || onOwnStar(e.clientX, e.clientY))) return;
+    pressOnName = Boolean(e.target.closest?.("a.region"));
     e.preventDefault();
     window.getSelection?.()?.removeAllRanges?.();
     dragging = true;
@@ -967,6 +973,17 @@ function wireStage() {
     g.classList.add("dragging");
     g.dataset.dragStart = `${e.clientX},${e.clientY}`;
   }, { capture: true });
+
+  // A mouse or pen press on the field itself is a map gesture: it must never
+  // start a text selection that runs up into the header. Touch is left to
+  // user-select (below): preventing a touch press would cancel the tap that
+  // places a star in WebKit. A press on a name is left alone, so its click
+  // still opens the constellation; forms and buttons are outside the stage.
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.defaultPrevented || e.pointerType === "touch" || e.target.closest?.("a, button")) return;
+    e.preventDefault();
+    window.getSelection?.()?.removeAllRanges?.();
+  });
 
   stage.addEventListener("click", (e) => {
     if (!swallowClick) return;
@@ -990,9 +1007,9 @@ function wireStage() {
     const [sx, sy] = (g?.dataset.dragStart ?? "0,0").split(",").map(Number);
     const end = e?.clientX !== undefined ? { clientX: e.clientX, clientY: e.clientY } : lastPoint ?? { clientX: sx, clientY: sy };
     const moved = Math.hypot(end.clientX - sx, end.clientY - sy) > 4;
-    // Whatever the press was, it belonged to the star: the click after it
-    // must not open a constellation whose name lies under the pointer.
-    swallowClick = true;
+    // The press belonged to the star: the click after a drag, or after any
+    // press that landed on a name, must not open that constellation.
+    swallowClick = moved || pressOnName;
     if (!moved) {
       // A tap on your star selects it for tap-to-move.
       setPicked(!picked);

@@ -726,6 +726,12 @@ export function renderHomePage(
     overflow: hidden;
     isolation: isolate;
     contain: paint;
+    /* The field is for placing and dragging stars, never for selecting
+       text; its names and figures are part of it. Only the field turns off
+       touch scrolling; forms and pages stay selectable. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
     touch-action: none;
   }
   svg#sky { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: hidden; }
