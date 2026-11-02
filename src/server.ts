@@ -39,7 +39,7 @@ import { IdempotencyCache, RateLimiter, isValidIdempotencyKey } from "./message-
 import { renderHomePage } from "./render.ts";
 import { renderAboutPage } from "./about.ts";
 import { clampToRegion, settlePosition, spotInRegion } from "./regions.ts";
-import { renderMarkdown } from "./markdown.ts";
+import { DOC_ASSETS, DOC_ASSET_HEADERS, renderReadmePage } from "./readme.ts";
 import { oldLight } from "./brightness.ts";
 import { ANONYMOUS, audit, starActor, type Room } from "./audit.ts";
 import { BREAK_MODES, isBreakMode, type BreakMode } from "./break.ts";
@@ -336,12 +336,6 @@ function issuedToken(req: IncomingMessage, res: ServerResponse): string {
   const token = generateToken();
   res.setHeader("Set-Cookie", serializeIdentityCookie(token, IS_PROD));
   return token;
-}
-
-function renderReadmePage(): string {
-  const md = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  const body = renderMarkdown(md);
-  return `<!doctype html><html lang="en-AU"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>About Overlap</title><style>body{max-width:40rem;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.5}</style></head><body><main>${body}</main><p><a href="/">Back to the lounge</a></p></body></html>`;
 }
 
 async function handleCreateStar(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -851,6 +845,9 @@ const server = createServer(async (req, res) => {
       );
     } else if (req.method === "GET" && path === "/readme/") {
       sendHtml(res, 200, renderReadmePage());
+    } else if (req.method === "GET" && DOC_ASSETS.has(path)) {
+      res.writeHead(200, DOC_ASSET_HEADERS);
+      res.end(DOC_ASSETS.get(path));
     } else if (req.method === "GET" && path === "/about/") {
       // A page to read: no cookie is read or set and nothing is logged.
       sendHtml(res, 200, renderAboutPage());

@@ -109,6 +109,18 @@ track.
 The supplied originals are kept, unshipped, in the gitignored
 `assets-src/break/`.
 
+## Documentation artwork
+
+- **Files:** `docs/assets/overlap-banner.svg`, `process-banner.svg`,
+  `process-timeline.svg`, `overlap-footer.svg` and the six `badge-*.svg`
+- **Source:** drawn by `scripts/build-doc-art.ts` from the lounge's own
+  constellation figures (`CONSTELLATION_INFO` in `src/render.ts`), written
+  with Claude Code on 2 November 2026. No image, font or icon from elsewhere.
+- **Use:** README and PROCESS banners, timeline, footer and badges, on GitHub
+  and at `/readme/`. Illustration only, labelled "not live activity"; the
+  figures are lines and hollow diamonds, never star dots.
+- **Licence:** original work for this project.
+
 ## Shipped files
 
 The page serves only these optimised copies, made from the originals above:

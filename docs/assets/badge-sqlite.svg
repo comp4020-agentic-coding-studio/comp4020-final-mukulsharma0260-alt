@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="169" height="24" viewBox="0 0 169 24" role="img" aria-label="storage: node:sqlite">
+<title>storage: node:sqlite</title>
+<clipPath id="r"><rect width="169" height="24" rx="5"/></clipPath>
+<g clip-path="url(#r)">
+<rect width="70" height="24" fill="#0B1020"/>
+<rect x="70" width="99" height="24" fill="#A78BFA"/>
+</g>
+<g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="600">
+<text x="35" y="16" text-anchor="middle" fill="#E8EAF3">storage</text>
+<text x="119.5" y="16" text-anchor="middle" fill="#0B1020">node:sqlite</text>
+</g>
+</svg>

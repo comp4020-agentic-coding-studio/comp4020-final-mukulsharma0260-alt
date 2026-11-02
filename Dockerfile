@@ -8,5 +8,6 @@ COPY migrations/ migrations/
 COPY src/ src/
 COPY public/ public/
 COPY README.md .
+COPY docs/assets/ docs/assets/
 ENV NODE_ENV=production
 CMD ["node", "src/server.ts"]
