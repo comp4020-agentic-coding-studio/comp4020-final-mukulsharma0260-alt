@@ -56,6 +56,12 @@ Everything a visitor reads uses these words, and only in these senses.
   returns it to the Common Room. "Study in a constellation…" opens the
   same list.
 
+- **About**: the lounge's link to the About page at `/about/`, a short
+  story of what the lounge is for, ending in "ENTER THE LOUNGE". It is a page
+  to read: opening it never enters the lounge or makes a star glow. The
+  plain README stays at `/readme/`, linked from the About page as "Read the
+  technical notes".
+
 Words never used for the place: server, channel, sky (as a name), check-in,
 profile, followers. "Sky" may describe the picture, never name the place.
 "Observatory" was an earlier prototype's name and is not visitor-facing.
