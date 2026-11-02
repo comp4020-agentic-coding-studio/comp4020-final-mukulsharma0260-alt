@@ -1437,7 +1437,7 @@ export function renderHomePage(
         <svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 40a80 80 0 1 1-75.4 53.3l22.6 8A56 56 0 1 0 120 64v28L72 52l48-40z"></path></svg>
         <span class="tool-label">Replay arrival</span>
       </button>
-      <a class="about-link" href="/readme/" aria-label="About Overlap"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 24a96 96 0 1 1 0 192 96 96 0 0 1 0-192zm0 24a72 72 0 1 0 0 144 72 72 0 0 0 0-144zm-12 60h24v64h-24zm12-40a14 14 0 1 1 0 28 14 14 0 0 1 0-28z"></path></svg><span class="about-label">About</span></a>
+      <a class="about-link" href="/about/" aria-label="About Overlap"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 24a96 96 0 1 1 0 192 96 96 0 0 1 0-192zm0 24a72 72 0 1 0 0 144 72 72 0 0 0 0-144zm-12 60h24v64h-24zm12-40a14 14 0 1 1 0 28 14 14 0 0 1 0-28z"></path></svg><span class="about-label">About</span></a>
     </div>
     <p id="phone-status" class="phone-status"${glowingTotal ? "" : ` data-quiet=""`}>${glowingTotal ? `${glowingTotal} studying` : "Nobody studying"}</p>
     <button type="button" id="menu-toggle" class="menu-toggle" aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet">Menu</button>
@@ -1523,7 +1523,7 @@ export function renderHomePage(
       <li><button type="button" class="sheet-row" data-menu="chat"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M30 60a20 20 0 0 1 20-20h140a20 20 0 0 1 20 20v90a20 20 0 0 1-20 20H110l-45 35v-35H50a20 20 0 0 1-20-20z"></path></svg><span class="sheet-row-name">Conversation</span></button></li>
       <li><button type="button" class="sheet-row" data-menu="break"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M96 44v112a28 28 0 1 1-16-25V70l112-26v96a28 28 0 1 1-16-25V64z"></path></svg><span class="sheet-row-name">Break</span></button></li>
       <li><button type="button" class="sheet-row" data-menu="replay"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 40a80 80 0 1 1-75.4 53.3l22.6 8A56 56 0 1 0 120 64v28L72 52l48-40z"></path></svg><span class="sheet-row-name">Replay arrival</span></button></li>
-      <li><a class="sheet-row" href="/readme/"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 24a96 96 0 1 1 0 192 96 96 0 0 1 0-192zm0 24a72 72 0 1 0 0 144 72 72 0 0 0 0-144zm-12 60h24v64h-24zm12-40a14 14 0 1 1 0 28 14 14 0 0 1 0-28z"></path></svg><span class="sheet-row-name">About</span></a></li>
+      <li><a class="sheet-row" href="/about/"><svg class="tool-icon" viewBox="0 0 240 240" aria-hidden="true" focusable="false"><path d="M120 24a96 96 0 1 1 0 192 96 96 0 0 1 0-192zm0 24a72 72 0 1 0 0 144 72 72 0 0 0 0-144zm-12 60h24v64h-24zm12-40a14 14 0 1 1 0 28 14 14 0 0 1 0-28z"></path></svg><span class="sheet-row-name">About</span></a></li>
     </ul>
   </div>
 

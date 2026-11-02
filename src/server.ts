@@ -37,6 +37,7 @@ import { isReservedCallsign, isValidCallsignFormat, normalizeCallsign, trimCalls
 import { ChatRoomRegistry } from "./chat-rooms.ts";
 import { IdempotencyCache, RateLimiter, isValidIdempotencyKey } from "./message-limits.ts";
 import { renderHomePage } from "./render.ts";
+import { renderAboutPage } from "./about.ts";
 import { clampToRegion, settlePosition, spotInRegion } from "./regions.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { oldLight } from "./brightness.ts";
@@ -850,6 +851,12 @@ const server = createServer(async (req, res) => {
       );
     } else if (req.method === "GET" && path === "/readme/") {
       sendHtml(res, 200, renderReadmePage());
+    } else if (req.method === "GET" && path === "/about/") {
+      // A page to read: no cookie is read or set and nothing is logged.
+      sendHtml(res, 200, renderAboutPage());
+    } else if (req.method === "GET" && path === "/about") {
+      res.writeHead(301, { Location: "/about/" });
+      res.end();
     } else if (req.method === "GET" && path === "/sky.js") {
       const js = readFileSync(new URL("../public/sky.js", import.meta.url), "utf8");
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
@@ -919,7 +926,7 @@ const server = createServer(async (req, res) => {
     // Enough to debug, nothing more: the method, which known route failed,
     // and the error's class. Never the message, stack, URL, headers or body,
     // any of which could carry something private.
-    const route = ["/", "/readme/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/star/constellation", "/api/callsign", "/api/message", "/api/here", "/api/listening"]
+    const route = ["/", "/readme/", "/about/", "/sky.js", "/events", "/api/star", "/api/star/move", "/api/star/constellation", "/api/callsign", "/api/message", "/api/here", "/api/listening"]
       .find((r) => req.url?.split("?")[0] === r) ?? "other";
     const kind = err instanceof Error ? err.constructor.name : "unknown";
     console.error(`error method=${req.method ?? "?"} route=${route} kind=${kind}`);

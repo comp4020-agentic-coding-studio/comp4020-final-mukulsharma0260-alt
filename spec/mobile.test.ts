@@ -105,7 +105,7 @@ it("Menu opens a sheet with Conversation, Break, Replay arrival and About, each 
     const items = [...sheet.querySelectorAll(".sheet-row")];
     expect(items.map((el) => text(el))).toEqual(["Conversation", "Break", "Replay arrival", "About"]);
     for (const el of items) expect(el.querySelector("svg.tool-icon")).not.toBeNull();
-    expect((items[3] as HTMLAnchorElement).getAttribute("href")).toBe("/readme/");
+    expect((items[3] as HTMLAnchorElement).getAttribute("href")).toBe("/about/");
     // Focus moves into the sheet.
     expect(sheet.contains(p.doc.activeElement)).toBe(true);
   } finally {
