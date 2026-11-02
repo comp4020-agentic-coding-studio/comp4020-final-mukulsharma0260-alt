@@ -574,3 +574,124 @@ dock and heading cover it entirely.
 | 1024x768 | star | constellation names do not overlap | pass | 5 names, none overlap |
 
 112 of 112 checks pass.
+
+## After: the final bug-fix and performance pass (0123b06)
+
+112 of 112 pass, unchanged; this pass changed the map, views, settling, film captions and the arrival, and none of them broke a phone layout check. Run on a fresh throwaway server with the laptop awake.
+
+| Size | State | Check | Result | Measured |
+|---|---|---|---|---|
+| 360x844 | no-star | no sideways scroll | pass | overflow 0px |
+| 360x844 | no-star | constellation names fully on screen | pass | 5 names inside 360px |
+| 360x844 | no-star | constellation names do not overlap | pass | 5 names, none overlap |
+| 360x844 | no-star | header ≤ 52px | pass | 52px |
+| 360x844 | no-star | no heading block | pass | hidden |
+| 360x844 | no-star | field ≥ 60% of viewport | pass | 731px = 87% |
+| 360x844 | no-star | dock ≤ 72px collapsed | pass | 61px |
+| 360x844 | no-star | callsign not in dock | pass | not in dock |
+| 360x844 | no-star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 360x844 | no-star | conversation is full-screen | pass | 360x844 at 0,0 |
+| 360x844 | star | no sideways scroll | pass | overflow 0px |
+| 360x844 | star | constellation names fully on screen | pass | 5 names inside 360px |
+| 360x844 | star | constellation names do not overlap | pass | 5 names, none overlap |
+| 360x844 | star | header ≤ 52px | pass | 52px |
+| 360x844 | star | no heading block | pass | hidden |
+| 360x844 | star | field ≥ 60% of viewport | pass | 735px = 87% |
+| 360x844 | star | dock ≤ 72px collapsed | pass | 57px |
+| 360x844 | star | callsign not in dock | pass | not in dock |
+| 360x844 | star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 360x844 | star | conversation is full-screen | pass | 360x844 at 0,0 |
+| 390x844 | no-star | no sideways scroll | pass | overflow 0px |
+| 390x844 | no-star | constellation names fully on screen | pass | 5 names inside 390px |
+| 390x844 | no-star | constellation names do not overlap | pass | 5 names, none overlap |
+| 390x844 | no-star | header ≤ 52px | pass | 52px |
+| 390x844 | no-star | no heading block | pass | hidden |
+| 390x844 | no-star | field ≥ 60% of viewport | pass | 731px = 87% |
+| 390x844 | no-star | dock ≤ 72px collapsed | pass | 61px |
+| 390x844 | no-star | callsign not in dock | pass | not in dock |
+| 390x844 | no-star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 390x844 | no-star | conversation is full-screen | pass | 390x844 at 0,0 |
+| 390x844 | star | no sideways scroll | pass | overflow 0px |
+| 390x844 | star | constellation names fully on screen | pass | 5 names inside 390px |
+| 390x844 | star | constellation names do not overlap | pass | 5 names, none overlap |
+| 390x844 | star | header ≤ 52px | pass | 52px |
+| 390x844 | star | no heading block | pass | hidden |
+| 390x844 | star | field ≥ 60% of viewport | pass | 735px = 87% |
+| 390x844 | star | dock ≤ 72px collapsed | pass | 57px |
+| 390x844 | star | callsign not in dock | pass | not in dock |
+| 390x844 | star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 390x844 | star | conversation is full-screen | pass | 390x844 at 0,0 |
+| 414x896 | no-star | no sideways scroll | pass | overflow 0px |
+| 414x896 | no-star | constellation names fully on screen | pass | 5 names inside 414px |
+| 414x896 | no-star | constellation names do not overlap | pass | 5 names, none overlap |
+| 414x896 | no-star | header ≤ 52px | pass | 52px |
+| 414x896 | no-star | no heading block | pass | hidden |
+| 414x896 | no-star | field ≥ 60% of viewport | pass | 783px = 87% |
+| 414x896 | no-star | dock ≤ 72px collapsed | pass | 61px |
+| 414x896 | no-star | callsign not in dock | pass | not in dock |
+| 414x896 | no-star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 414x896 | no-star | conversation is full-screen | pass | 414x896 at 0,0 |
+| 414x896 | star | no sideways scroll | pass | overflow 0px |
+| 414x896 | star | constellation names fully on screen | pass | 5 names inside 414px |
+| 414x896 | star | constellation names do not overlap | pass | 5 names, none overlap |
+| 414x896 | star | header ≤ 52px | pass | 52px |
+| 414x896 | star | no heading block | pass | hidden |
+| 414x896 | star | field ≥ 60% of viewport | pass | 787px = 88% |
+| 414x896 | star | dock ≤ 72px collapsed | pass | 57px |
+| 414x896 | star | callsign not in dock | pass | not in dock |
+| 414x896 | star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 414x896 | star | conversation is full-screen | pass | 414x896 at 0,0 |
+| 430x932 | no-star | no sideways scroll | pass | overflow 0px |
+| 430x932 | no-star | constellation names fully on screen | pass | 5 names inside 430px |
+| 430x932 | no-star | constellation names do not overlap | pass | 5 names, none overlap |
+| 430x932 | no-star | header ≤ 52px | pass | 52px |
+| 430x932 | no-star | no heading block | pass | hidden |
+| 430x932 | no-star | field ≥ 60% of viewport | pass | 819px = 88% |
+| 430x932 | no-star | dock ≤ 72px collapsed | pass | 61px |
+| 430x932 | no-star | callsign not in dock | pass | not in dock |
+| 430x932 | no-star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 430x932 | no-star | conversation is full-screen | pass | 430x932 at 0,0 |
+| 430x932 | star | no sideways scroll | pass | overflow 0px |
+| 430x932 | star | constellation names fully on screen | pass | 5 names inside 430px |
+| 430x932 | star | constellation names do not overlap | pass | 5 names, none overlap |
+| 430x932 | star | header ≤ 52px | pass | 52px |
+| 430x932 | star | no heading block | pass | hidden |
+| 430x932 | star | field ≥ 60% of viewport | pass | 823px = 88% |
+| 430x932 | star | dock ≤ 72px collapsed | pass | 57px |
+| 430x932 | star | callsign not in dock | pass | not in dock |
+| 430x932 | star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 430x932 | star | conversation is full-screen | pass | 430x932 at 0,0 |
+| 844x390 | no-star | no sideways scroll | pass | overflow 0px |
+| 844x390 | no-star | constellation names fully on screen | pass | 5 names inside 844px |
+| 844x390 | no-star | constellation names do not overlap | pass | 5 names, none overlap |
+| 844x390 | no-star | header ≤ 52px | pass | 52px |
+| 844x390 | no-star | no heading block | pass | hidden |
+| 844x390 | no-star | field ≥ 60% of viewport | pass | 277px = 71% |
+| 844x390 | no-star | dock ≤ 72px collapsed | pass | 61px |
+| 844x390 | no-star | callsign not in dock | pass | not in dock |
+| 844x390 | no-star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 844x390 | no-star | conversation is full-screen | pass | 844x390 at 0,0 |
+| 844x390 | star | no sideways scroll | pass | overflow 0px |
+| 844x390 | star | constellation names fully on screen | pass | 5 names inside 844px |
+| 844x390 | star | constellation names do not overlap | pass | 5 names, none overlap |
+| 844x390 | star | header ≤ 52px | pass | 52px |
+| 844x390 | star | no heading block | pass | hidden |
+| 844x390 | star | field ≥ 60% of viewport | pass | 281px = 72% |
+| 844x390 | star | dock ≤ 72px collapsed | pass | 57px |
+| 844x390 | star | callsign not in dock | pass | not in dock |
+| 844x390 | star | targets ≥ 44px | pass | 9 targets, all ≥ 44px |
+| 844x390 | star | conversation is full-screen | pass | 844x390 at 0,0 |
+| 768x1024 | no-star | no sideways scroll | pass | overflow 0px |
+| 768x1024 | no-star | constellation names fully on screen | pass | 5 names inside 768px |
+| 768x1024 | no-star | constellation names do not overlap | pass | 5 names, none overlap |
+| 768x1024 | star | no sideways scroll | pass | overflow 0px |
+| 768x1024 | star | constellation names fully on screen | pass | 5 names inside 768px |
+| 768x1024 | star | constellation names do not overlap | pass | 5 names, none overlap |
+| 1024x768 | no-star | no sideways scroll | pass | overflow 0px |
+| 1024x768 | no-star | constellation names fully on screen | pass | 5 names inside 1024px |
+| 1024x768 | no-star | constellation names do not overlap | pass | 5 names, none overlap |
+| 1024x768 | star | no sideways scroll | pass | overflow 0px |
+| 1024x768 | star | constellation names fully on screen | pass | 5 names inside 1024px |
+| 1024x768 | star | constellation names do not overlap | pass | 5 names, none overlap |
+
+112 of 112 checks pass.

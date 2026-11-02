@@ -111,3 +111,12 @@ The cost moves from the first entry to every entry: a visitor who does not
 skip waits up to 30 seconds each time, and the film files (about 15 MB MP4
 or 10 MB WebM) and the 480 KB track are fetched after each ENTER, subject
 to the browser's cache.
+
+Amended 2 November 2026: the film now ships at 720p, the source's own
+resolution, as 5.4 MB (MP4) and 3.8 MB (WebM) instead of 14.9 MB and
+9.7 MB, at SSIM 0.987 against the 1080p master; this supersedes the sizes
+and the 1080p upscale in the Consequences above. Because the film plays
+on every visit, its weight is paid on every visit, which is what made the
+re-encode worth it. The files have new names (`arrival-film-720.*`) so no
+immutable cached copy is ever replaced. Captions now change only once the
+previous one has fully faded (350 ms), so two lines never show at once.
