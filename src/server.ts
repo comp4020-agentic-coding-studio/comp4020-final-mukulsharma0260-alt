@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import {
   COOKIE_NAME,
   generateToken,
@@ -54,6 +54,17 @@ const MAX_BODY_BYTES = 10_000;
 // The arrival artwork, served from an explicit allowlist rather than a
 // directory, so a crafted path can never reach any other file. The PNG is
 // only the fallback for browsers without WebP.
+// Each shipped file's size, read once: the files are part of the image.
+const assetSizes = new Map<string, number>();
+function assetSize(path: string, file: URL): number {
+  let size = assetSizes.get(path);
+  if (size === undefined) {
+    size = statSync(file).size;
+    assetSizes.set(path, size);
+  }
+  return size;
+}
+
 const ASSETS: Record<string, string> = {
   "/assets/arrival-galaxy-960.webp": "image/webp",
   "/assets/arrival-galaxy-1920.webp": "image/webp",
@@ -844,7 +855,20 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       res.end(js);
     } else if (req.method === "GET" && Object.hasOwn(ASSETS, path)) {
-      const asset = readFileSync(new URL(`../public${path}`, import.meta.url));
+      // Streamed from disk, never read whole: Safari fetches the 15 MB film
+      // in many byte ranges, and a whole-file synchronous read for each one
+      // held up every other request on this one process. The files ship in
+      // the image and never change while it runs, so their sizes are looked
+      // up once.
+      const file = new URL(`../public${path}`, import.meta.url);
+      const size = assetSize(path, file);
+      const send = (status: number, extra: Record<string, string | number>, start: number, end: number) => {
+        res.writeHead(status, { ...headers, ...extra, "Content-Length": end - start + 1 });
+        const stream = createReadStream(file, { start, end });
+        stream.on("error", () => res.destroy());
+        res.on("close", () => stream.destroy());
+        stream.pipe(res);
+      };
       const headers = {
         "Content-Type": ASSETS[path]!,
         "Accept-Ranges": "bytes",
@@ -855,19 +879,19 @@ const server = createServer(async (req, res) => {
       // the whole file.
       const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
       if (range && (range[1] || range[2])) {
-        const size = asset.length;
         const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
         const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
         if (start > end || start >= size) {
           res.writeHead(416, { "Content-Range": `bytes */${size}` });
           res.end();
         } else {
-          res.writeHead(206, { ...headers, "Content-Length": end - start + 1, "Content-Range": `bytes ${start}-${end}/${size}` });
-          res.end(asset.subarray(start, end + 1));
+          send(206, { "Content-Range": `bytes ${start}-${end}/${size}` }, start, end);
         }
+      } else if (size === 0) {
+        res.writeHead(200, { ...headers, "Content-Length": 0 });
+        res.end();
       } else {
-        res.writeHead(200, { ...headers, "Content-Length": asset.length });
-        res.end(asset);
+        send(200, {}, 0, size - 1);
       }
     } else if (req.method === "GET" && path === "/events") {
       handleEvents(req, res);

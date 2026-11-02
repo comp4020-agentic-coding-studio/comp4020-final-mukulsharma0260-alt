@@ -44,3 +44,15 @@ Option 1.
   by default, configurable from 1 to 60 days), but Fly's own docs caution
   that a daily snapshot may not hold the most recent writes, so it reduces
   this risk without removing it.
+
+Amended 2 November 2026: static files are streamed. The server used to
+read each shipped file whole and synchronously on every request, including
+every byte range Safari asks for while playing the 15 MB arrival film, and
+on one process that blocked /api and /events too. Each file's size is now
+read once (the files are part of the image and never change while it
+runs), and each response is streamed from disk with `createReadStream`,
+keeping byte ranges, 206 and 416, types and the immutable cache header.
+Measured locally with four clients pulling the film in 1 MB ranges, the
+page's median response went from 8.8 ms to 1.0 ms (p95 13.8 ms to 2.2 ms);
+the numbers are in docs/evidence/performance.md. Still plain Node, still
+one machine.
