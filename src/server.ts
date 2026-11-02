@@ -845,6 +845,9 @@ const server = createServer(async (req, res) => {
       );
     } else if (req.method === "GET" && path === "/readme/") {
       sendHtml(res, 200, renderReadmePage());
+    } else if (req.method === "GET" && path === "/readme") {
+      res.writeHead(301, { Location: "/readme/" });
+      res.end();
     } else if (req.method === "GET" && DOC_ASSETS.has(path)) {
       const asset = DOC_ASSETS.get(path)!;
       res.writeHead(200, asset.headers);

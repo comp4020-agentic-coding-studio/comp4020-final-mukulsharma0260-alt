@@ -132,3 +132,16 @@ it("a contents jump marks its own section, even one too short to reach the top",
   expect(current()).toBe("#sources");
   dom.window.close();
 });
+
+it("/readme redirects permanently to /readme/, setting no cookie", async () => {
+  const bare = await fetch(new URL("/readme", baseUrl), { redirect: "manual" });
+  expect(bare.status).toBe(301);
+  expect(bare.headers.get("location")).toBe("/readme/");
+  expect(bare.headers.get("set-cookie")).toBeNull();
+  const followed = await get("/readme");
+  expect(followed.status).toBe(200);
+  expect(new URL(followed.url).pathname).toBe("/readme/");
+  expect(followed.headers.get("set-cookie")).toBeNull();
+  const headings = [...new JSDOM(await followed.text()).window.document.querySelectorAll(".doc h2")].map((h) => h.textContent);
+  expect(headings).toEqual(renderMarkdownDocument(readFileSync("README.md", "utf8")).headings.filter((h) => h.level === 2).map((h) => h.text));
+});
