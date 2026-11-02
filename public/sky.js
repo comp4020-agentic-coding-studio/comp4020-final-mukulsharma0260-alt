@@ -888,20 +888,72 @@ function ownStarInView() {
   return view === "common" || ownArea() === view;
 }
 
+// The own star's target is a 44px circle round its centre. It wins over a
+// constellation's name lying on top of it, so the star can always be
+// grabbed; the rest of the name still opens its constellation.
+const STAR_TARGET_RADIUS = 22;
+
+function onOwnStar(clientX, clientY) {
+  const g = starNodes.get(ownId());
+  if (!g || !ownStarInView()) return false;
+  const r = g.querySelector(".star-core")?.getBoundingClientRect?.() ?? g.getBoundingClientRect?.();
+  if (!r || (!r.width && !r.height)) return false;
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+  return Math.hypot(clientX - cx, clientY - cy) <= STAR_TARGET_RADIUS;
+}
+
+// A star dropped on a constellation's name would sit under it, so it moves
+// to the nearest point just clear of the name before it is saved.
+function clearOfNames(clientX, clientY) {
+  // Names are only shown in the Common Room.
+  if (view !== "common") return { clientX, clientY };
+  const pad = 4;
+  for (const a of doorways.values()) {
+    const r = a.getBoundingClientRect?.();
+    if (!r || !r.width || clientX <= r.left || clientX >= r.right || clientY <= r.top || clientY >= r.bottom) continue;
+    const exits = [
+      [clientX, r.top - pad, clientY - r.top],
+      [clientX, r.bottom + pad, r.bottom - clientY],
+      [r.left - pad, clientY, clientX - r.left],
+      [r.right + pad, clientY, r.right - clientX],
+    ];
+    exits.sort((p, q) => p[2] - q[2]);
+    return { clientX: exits[0][0], clientY: exits[0][1] };
+  }
+  return { clientX, clientY };
+}
+
 function wireStage() {
   const own = () => starNodes.get(ownId());
+  // Set after a drag, so the click that follows it is not taken as opening
+  // whatever lies under the pointer.
+  let swallowClick = false;
+  let lastPoint = null;
 
+  // Capture phase, so the star is found before a name on top of it acts.
   stage.addEventListener("pointerdown", (e) => {
     const g = own();
-    if (!g || !g.contains(e.target) || !ownStarInView()) return;
+    if (!g || !(g.contains(e.target) || onOwnStar(e.clientX, e.clientY))) return;
+    e.preventDefault();
+    window.getSelection?.()?.removeAllRanges?.();
     dragging = true;
+    lastPoint = { clientX: e.clientX, clientY: e.clientY };
     stage.setPointerCapture?.(e.pointerId);
     g.classList.add("dragging");
     g.dataset.dragStart = `${e.clientX},${e.clientY}`;
-  });
+  }, { capture: true });
+
+  stage.addEventListener("click", (e) => {
+    if (!swallowClick) return;
+    swallowClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, { capture: true });
 
   stage.addEventListener("pointermove", (e) => {
     if (!dragging) return;
+    lastPoint = { clientX: e.clientX, clientY: e.clientY };
     const { x, y } = toStagePoint(e.clientX, e.clientY);
     moveOwnLocally(x, y);
   });
@@ -912,7 +964,11 @@ function wireStage() {
     const g = own();
     g?.classList.remove("dragging");
     const [sx, sy] = (g?.dataset.dragStart ?? "0,0").split(",").map(Number);
-    const moved = Math.hypot((e?.clientX ?? sx) - sx, (e?.clientY ?? sy) - sy) > 4;
+    const end = e?.clientX !== undefined ? { clientX: e.clientX, clientY: e.clientY } : lastPoint ?? { clientX: sx, clientY: sy };
+    const moved = Math.hypot(end.clientX - sx, end.clientY - sy) > 4;
+    // Whatever the press was, it belonged to the star: the click after it
+    // must not open a constellation whose name lies under the pointer.
+    swallowClick = true;
     if (!moved) {
       // A tap on your star selects it for tap-to-move.
       setPicked(!picked);
@@ -920,6 +976,11 @@ function wireStage() {
     }
     const star = stars.get(ownId());
     if (!star) return;
+    const clear = clearOfNames(end.clientX, end.clientY);
+    if (clear.clientX !== end.clientX || clear.clientY !== end.clientY) {
+      const q = toStagePoint(clear.clientX, clear.clientY);
+      moveOwnLocally(q.x, q.y);
+    }
     clearTimeout(saveTimer);
     postMove(star.x, star.y)
       .then(() => announce("Star moved."))
@@ -940,7 +1001,9 @@ function wireStage() {
     }
     if (!picked) return;
     setPicked(false);
-    const p = moveOwnLocally(x, y);
+    const clear = clearOfNames(e.clientX, e.clientY);
+    const target = clear.clientX === e.clientX && clear.clientY === e.clientY ? { x, y } : toStagePoint(clear.clientX, clear.clientY);
+    const p = moveOwnLocally(target.x, target.y);
     postMove(p.x, p.y)
       .then(() => announce("Star moved."))
       .catch(() => announceError(phoneText("Could not save your star's new position. Check your connection and try again.", "Could not save. Check your connection.")));
