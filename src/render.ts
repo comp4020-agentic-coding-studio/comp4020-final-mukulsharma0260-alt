@@ -1393,8 +1393,8 @@ export function renderHomePage(
     </picture>
   </div>
   <video class="film-layer film-cloud" muted playsinline preload="none" aria-hidden="true" disablepictureinpicture disableremoteplayback>
-    <source data-src="/assets/arrival-film-1080.webm" type="video/webm">
-    <source data-src="/assets/arrival-film-1080.mp4" type="video/mp4">
+    <source data-src="/assets/arrival-film-720.webm" type="video/webm">
+    <source data-src="/assets/arrival-film-720.mp4" type="video/mp4">
   </video>
   <div class="film-layer film-grain" aria-hidden="true"></div>
   <div class="film-layer film-vignette" aria-hidden="true"></div>

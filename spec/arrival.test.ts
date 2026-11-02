@@ -135,8 +135,8 @@ it("serves every arrival asset with its real content type", async () => {
     ["/assets/arrival-nebula-720.webm", "video/webm"],
     ["/assets/arrival-nebula-720.mp4", "video/mp4"],
     ["/assets/arrival-film-music.mp3", "audio/mpeg"],
-    ["/assets/arrival-film-1080.webm", "video/webm"],
-    ["/assets/arrival-film-1080.mp4", "video/mp4"],
+    ["/assets/arrival-film-720.webm", "video/webm"],
+    ["/assets/arrival-film-720.mp4", "video/mp4"],
   ];
   for (const [path, type] of assets) {
     const res = await fetch(new URL(path, baseUrl));

@@ -1,12 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { expect, it } from "vitest";
 
 // The film is the author's Luna AI video: a fast montage of hard cuts,
 // slowed to 30 seconds with its cuts dissolved and its whites toned down.
 // These check the shipped files, not the page: no sound can ever come from
 // them, and they stay within the flash limit.
-const FILM = ["public/assets/arrival-film-1080.mp4", "public/assets/arrival-film-1080.webm"];
+const FILM = ["public/assets/arrival-film-720.mp4", "public/assets/arrival-film-720.webm"];
+
+// The source is 720p; an upscale to 1080p tripled the download for detail
+// that was never there (SSIM 0.987 against the 1080p master at 720p). A new
+// film must stay this light: every visitor downloads it on every visit.
+it("each film file is at most 6 MB", () => {
+  for (const f of FILM) expect(statSync(f).size, f).toBeLessThanOrEqual(6 * 1024 * 1024);
+});
 
 it("the film MP4 has no audio track", () => {
   // Every track in an MP4 declares its kind in an "hdlr" box: "vide" for

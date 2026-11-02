@@ -596,7 +596,7 @@ it("the film is the author's video, full-bleed over the galaxy picture, never a 
     f.enter();
     // The film is the author's whole Luna video, silent.
     const srcs = [...cloud!.querySelectorAll("source")].map((s) => s.getAttribute("src"));
-    expect(srcs).toEqual(["/assets/arrival-film-1080.webm", "/assets/arrival-film-1080.mp4"]);
+    expect(srcs).toEqual(["/assets/arrival-film-720.webm", "/assets/arrival-film-720.mp4"]);
   } finally {
     f.close();
   }

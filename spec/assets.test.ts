@@ -8,7 +8,7 @@ import { expect, inject, it } from "vitest";
 // must keep (ranges, 206, 416, types, caching), and that the handler no
 // longer reads files synchronously.
 const baseUrl = inject("baseUrl");
-const FILM = "/assets/arrival-film-1080.mp4";
+const FILM = "/assets/arrival-film-720.mp4";
 const filmPath = new URL(`../public${FILM}`, import.meta.url);
 const size = statSync(filmPath).size;
 const bytes = (start: number, end: number) => readFileSync(filmPath).subarray(start, end + 1);
