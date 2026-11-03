@@ -7,15 +7,14 @@
 //
 //   APP_URL=http://localhost:8080 PLAYWRIGHT=<path> node scripts/check-about.ts
 //
-// SHOTS=<dir> saves screenshots. PREVIEW_VIDEO=<file> also measures contrast
-// with that file playing behind the first chapter, served to the browser by
-// the check itself: the page ships no video, and the file is never copied.
+// SHOTS=<dir> saves screenshots. The first chapter's NASA background video
+// is checked as shipped; its failures (a broken file, a refused play, a
+// hidden tab) are made inside the test browser, never on the server.
 //
 // The About page itself writes nothing, but the check enters the lounge from
 // it, so like the other browser checks it refuses any host but a local one.
 // Exits 1 if any check fails.
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const pw = require(process.env.PLAYWRIGHT ?? "playwright");
@@ -28,7 +27,7 @@ if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(new URL(APP_URL).hostna
 const B = new URL("/", APP_URL).toString();
 const ABOUT = B + "about/";
 const SHOTS = process.env.SHOTS;
-const PREVIEW = process.env.PREVIEW_VIDEO ? readFileSync(process.env.PREVIEW_VIDEO) : null;
+const MOON = /\/assets\/about-moon-576\.(mp4|webm)$/;
 const SIZES: Array<[number, number]> = [[1920, 1080], [1440, 900], [1280, 800], [390, 844], [360, 844], [414, 896], [844, 390]];
 const isPhone = (w: number, h: number) => w <= 600 || h <= 500;
 
@@ -287,10 +286,12 @@ for (const engine of ["chromium", "webkit"]) {
       await page.goBack(); await page.waitForTimeout(150);
       const back1 = new URL(page.url());
 
-      // Until here the visitor has only read: nothing but GETs for the page
-      // and its artwork, no stream, no API call, no cookie.
+      // Until here the visitor has only read: nothing but GETs for the page,
+      // its galaxy artwork and its background video. No stream, no API call,
+      // no other file, no cookie.
       const aboutReqs = [...requests];
-      const strays = aboutReqs.filter((r) => r.method !== "GET" || new URL(r.url).origin !== new URL(B).origin || /^\/(events|api\/)/.test(new URL(r.url).pathname));
+      const allowed = /^\/(about\/|assets\/arrival-galaxy-(960|1920)\.webp|assets\/about-moon-576\.(mp4|webm))$/;
+      const strays = aboutReqs.filter((r) => r.method !== "GET" || new URL(r.url).origin !== new URL(B).origin || !allowed.test(new URL(r.url).pathname));
       report(where, "stays out of the lounge", strays.length === 0, `${aboutReqs.length} requests: ${[...new Set(aboutReqs.map((r) => new URL(r.url).pathname))].join(", ")}${strays.length ? `; strays ${strays.map((r) => `${r.method} ${r.url}`).join(", ")}` : ""}`);
       const cookies = await ctx.cookies();
       report(where, "sets no cookie", cookies.length === 0, `${cookies.length} cookies`);
@@ -334,20 +335,20 @@ for (const engine of ["chromium", "webkit"]) {
       await ctx.close();
     }
 
-    // The moving background. The page ships no video: to prove the rules, the
-    // check hands the empty slot a stand-in address and answers it itself,
-    // with an empty response (which no browser can play) or, given
-    // PREVIEW_VIDEO, the file named there. Nothing is copied into the app.
-    const standIn = async (opts: Record<string, unknown>, conn: string, body: Buffer | null) => {
-      const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, ...opts });
+    // The moving background, as shipped. Each context counts its own video
+    // requests. "broken" answers them with an empty file no browser can
+    // decode; "refused" makes every play() reject, as a browser that allows
+    // no autoplay would.
+    const videoCtx = async (opts: Record<string, unknown>, conn: string, mode: "real" | "broken" | "refused", size: [number, number] = [390, 844]) => {
+      const ctx = await browser.newContext({ viewport: { width: size[0], height: size[1] }, hasTouch: size[0] < 600, ...opts });
+      await ctx.addInitScript(OBSERVE);
+      await ctx.addInitScript(`addEventListener("load", () => { window.__loadAt = performance.now(); }); new MutationObserver(() => { if (!window.__madeAt && document.querySelector("video")) window.__madeAt = performance.now(); }).observe(document, { childList: true, subtree: true });`);
       if (conn) await ctx.addInitScript(`Object.defineProperty(Navigator.prototype, "connection", { get: () => (${conn}) });`);
+      if (mode === "refused") await ctx.addInitScript(`HTMLMediaElement.prototype.play = function () { return Promise.reject(new DOMException("refused by the check", "NotAllowedError")); };`);
       const seen = { fetched: 0 };
-      await ctx.route("**/about/", async (r: any) => {
-        const res = await r.fetch();
-        await r.fulfill({ response: res, body: (await res.text()).replace('data-src=""', 'data-src="/check-about-stand-in.mp4"') });
-      });
-      await ctx.route("**/check-about-stand-in.mp4", (r: any) => { seen.fetched++; return body ? r.fulfill({ status: 200, contentType: "video/mp4", body }) : r.fulfill({ status: 204, body: "" }); });
       const page = await ctx.newPage();
+      page.on("request", (r: any) => { if (MOON.test(new URL(r.url()).pathname)) seen.fetched++; });
+      if (mode === "broken") await ctx.route(MOON, (r: any) => r.fulfill({ status: 200, contentType: "video/mp4", body: "" }));
       const errors: string[] = [];
       page.on("console", (m: any) => { if (m.type() === "error") errors.push(m.text()); });
       page.on("pageerror", (e: Error) => errors.push(e.message));
@@ -358,33 +359,104 @@ for (const engine of ["chromium", "webkit"]) {
       const slot = document.querySelector("[data-about-video]")!;
       return {
         video: document.querySelectorAll("video").length,
+        inSlot: !!v && v.parentElement === slot,
         on: slot.classList.contains("is-on"),
         slotOpacity: parseFloat(getComputedStyle(slot).opacity),
         poster: /arrival-galaxy-(960|1920)\.webp/.test(getComputedStyle(document.querySelector(".about-stage")!).backgroundImage),
         playing: !!v && !v.paused,
-        muted: !!v && v.muted,
+        muted: !!v && v.muted && v.defaultMuted && v.volume >= 0,
         loop: !!v && v.loop,
-        inline: !!v && v.playsInline,
+        inline: !!v && v.playsInline && v.hasAttribute("playsinline"),
+        controls: !!v && v.controls,
+        focusable: !!v && v.tabIndex >= 0,
+        audio: !!v && (((v as any).audioTracks?.length ?? 0) > 0 || (v as any).mozHasAudio === true || ((v as any).webkitAudioDecodedByteCount ?? 0) > 0),
+        src: v ? new URL(v.currentSrc || v.src).pathname : "",
         lit: [...document.querySelectorAll(".about-beat")].filter((b) => parseFloat(getComputedStyle(b).opacity) < 0.99).length,
         prompter: document.documentElement.classList.contains("prompter"),
       };
     });
+    const onHow = (page: Pg) => page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
     const where = `${engine} 390x844`;
 
-    // Lazy: opened at the last chapter, nothing is made or fetched; the
-    // video is made only once the first chapter comes near again.
+    // Lazy: at load nothing is fetched; at the top it is fetched only after
+    // its chapter has stayed in view a moment. Opened at the last chapter,
+    // nothing at all until the first chapter comes back.
     {
-      const { ctx, page, seen, errors } = await standIn({}, "", null);
-      await page.goto(ABOUT + "#return", { waitUntil: "load" });
-      await page.waitForTimeout(1200);
-      const far = await stage(page);
-      const fetchedFar = seen.fetched;
-      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-      await page.waitForTimeout(1500);
-      const near = await stage(page);
-      report(`${where} lazy video`, "made only near its chapter", far.video === 0 && fetchedFar === 0 && seen.fetched > 0, `at Return: ${far.video} video, ${fetchedFar} requests; back at the top: ${seen.fetched} requests`);
-      // The stand-in cannot play: the video is dropped and the galaxy stays.
-      report(`${where} unplayable video`, "galaxy stays, no error", near.video === 0 && !near.on && near.slotOpacity === 0 && near.poster && errors.length === 0, `video elements ${near.video}, slot on ${near.on}, slot opacity ${near.slotOpacity}, galaxy ${near.poster}, errors ${errors.length ? errors.join(" | ") : "none"}`);
+      // Judged by the element: with preload "none" a browser that will not
+      // play (headless WebKit) never fetches at all, which is fine.
+      const { ctx, page, seen, errors } = await videoCtx({}, "", "real");
+      await page.goto(ABOUT, { waitUntil: "load" });
+      const atLoad = { fetched: seen.fetched, video: await page.evaluate(() => document.querySelectorAll("video").length) };
+      await page.waitForTimeout(2000);
+      const made = await page.evaluate(() => ({ at: (window as any).__madeAt ?? -1, load: (window as any).__loadAt ?? -1 }));
+      report(`${where} lazy video`, "nothing made or fetched at load", atLoad.fetched === 0 && atLoad.video === 0 && made.at > 0 && made.at - made.load >= 550, `at load ${atLoad.video} video, ${atLoad.fetched} requests; made ${Math.round(made.at - made.load)}ms after load; ${seen.fetched} requests by 2s`);
+      await ctx.close();
+      const far = await videoCtx({}, "", "real");
+      await far.page.goto(ABOUT + "#return", { waitUntil: "load" });
+      await far.page.waitForTimeout(1500);
+      const atReturn = await stage(far.page);
+      const fetchedFar = far.seen.fetched;
+      await onHow(far.page);
+      await far.page.waitForTimeout(2500);
+      const back = await stage(far.page);
+      report(`${where} lazy video`, "made only near its chapter", atReturn.video === 0 && fetchedFar === 0 && back.video === 1 && back.inSlot, `at Return: ${atReturn.video} video, ${fetchedFar} requests; back at the top: ${back.video} video, ${far.seen.fetched} requests, ${back.src}`);
+      report(`${where} lazy video`, "no console errors", errors.length === 0 && far.errors.length === 0, [...errors, ...far.errors].slice(0, 3).join(" | ") || "none");
+      await far.ctx.close();
+    }
+
+    // As shipped: silent, looped, inline, no controls, never focusable; it
+    // plays behind How it works only, pauses at every later chapter and
+    // when the tab is hidden or the page is left, and comes back with its
+    // chapter. Headless WebKit refuses a page's own play() without a gesture
+    // (Safari allows a muted inline video); there the galaxy must stay.
+    {
+      const { ctx, page, errors } = await videoCtx({}, "", "real");
+      await page.goto(ABOUT, { waitUntil: "load" });
+      await page.waitForTimeout(3000);
+      const top = await stage(page);
+      const later: string[] = [];
+      for (const id of ["focus", "talk", "return"]) {
+        await page.evaluate((id: string) => { const r = document.getElementById(id)!.getBoundingClientRect(); window.scrollTo({ top: r.top + scrollY, behavior: "instant" }); }, id);
+        await page.waitForTimeout(1600);
+        const s = await stage(page);
+        if (s.on || s.playing || s.slotOpacity > 0.01) later.push(`${id}: ${s.on ? "shown" : "hidden"}, ${s.playing ? "playing" : "paused"}, opacity ${s.slotOpacity.toFixed(2)}`);
+      }
+      await onHow(page); await page.waitForTimeout(2200);
+      const again = await stage(page);
+      await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+      await page.waitForTimeout(300);
+      const hidden = await stage(page);
+      await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); document.dispatchEvent(new Event("visibilitychange")); });
+      await page.waitForTimeout(800);
+      const shown = await stage(page);
+      await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+      await page.waitForTimeout(300);
+      const left = await stage(page);
+      const silent = top.muted && top.loop && top.inline && !top.controls && !top.focusable && !top.audio;
+      report(`${where} video`, "silent, looped, inline, no controls, not focusable", top.video === 1 && silent, `muted ${top.muted}, loop ${top.loop}, playsinline ${top.inline}, controls ${top.controls}, focusable ${top.focusable}, audio ${top.audio}, ${top.src}`);
+      if (engine === "chromium" || top.playing) {
+        report(`${where} video`, "plays behind How it works only", top.on && top.playing && later.length === 0 && again.on && again.playing, `top ${top.on ? "shown" : "hidden"}/${top.playing ? "playing" : "paused"}; later chapters ${later.length ? later.join("; ") : "all hidden and paused"}; back at top ${again.on ? "shown" : "hidden"}/${again.playing ? "playing" : "paused"}`);
+        report(`${where} video`, "pauses when hidden or left", !hidden.playing && shown.playing && !left.playing && !left.on, `hidden tab ${hidden.playing ? "playing" : "paused"}, shown again ${shown.playing ? "playing" : "paused"}, after pagehide ${left.playing ? "playing" : "paused"}/${left.on ? "shown" : "hidden"}`);
+      } else {
+        // Coming back to the chapter, WebKit may then allow play(): it must
+        // then be shown and playing, or else stay hidden. Never shown paused.
+        report(`${where} video, autoplay refused`, "galaxy stays", !top.on && top.slotOpacity === 0 && top.poster && later.length === 0 && (again.on === again.playing), `slot on ${top.on}, opacity ${top.slotOpacity}, galaxy ${top.poster}; later chapters ${later.length ? later.join("; ") : "all hidden"}; back at top on ${again.on}, opacity ${again.slotOpacity}`);
+      }
+      report(`${where} video`, "no console errors", errors.length === 0, errors.length ? errors.slice(0, 3).join(" | ") : "none");
+      await ctx.close();
+    }
+
+    // Failures: an undecodable file, and a browser that refuses to play.
+    // Either way the galaxy stays, with nothing blank and no error.
+    for (const mode of ["broken", "refused"] as const) {
+      const { ctx, page, seen, errors } = await videoCtx({}, "", mode);
+      await page.goto(ABOUT, { waitUntil: "load" });
+      await page.waitForTimeout(2500);
+      const s = await stage(page);
+      // An undecodable file is dropped once fetched; a browser that does not
+      // fetch it (play refused, preload none) just never shows it.
+      const gone = mode === "broken" && seen.fetched > 0 ? s.video === 0 : !s.playing;
+      report(`${where} ${mode === "broken" ? "undecodable video" : "play refused"}`, "galaxy stays, no error", gone && !s.on && s.slotOpacity === 0 && s.poster && errors.length === 0, `requests ${seen.fetched}, video elements ${s.video}, slot on ${s.on}, opacity ${s.slotOpacity}, galaxy ${s.poster}, errors ${errors.length ? errors.join(" | ") : "none"}`);
       await ctx.close();
     }
 
@@ -396,9 +468,9 @@ for (const engine of ["chromium", "webkit"]) {
       ["slow-2g", {}, "{ saveData: false, effectiveType: 'slow-2g' }"],
     ];
     for (const [name, opts, conn] of guards) {
-      const { ctx, page, seen } = await standIn(opts, conn, null);
+      const { ctx, page, seen } = await videoCtx(opts, conn, "real");
       await page.goto(ABOUT, { waitUntil: "load" });
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(2000);
       const s = await stage(page);
       report(`${where} ${name}`, "still galaxy, no video", s.video === 0 && seen.fetched === 0 && s.poster, `video elements ${s.video}, video requests ${seen.fetched}, galaxy ${s.poster}`);
       if (name === "reduced motion") {
@@ -410,42 +482,54 @@ for (const engine of ["chromium", "webkit"]) {
       await ctx.close();
     }
 
-    // With a real file: it plays muted, looped and inline behind the first
-    // chapter, gives way to the galaxy at the next, comes back on return,
-    // and the words over it keep their contrast. Headless WebKit refuses a
-    // page's own play() without a gesture (Safari does not, for a muted
-    // inline video); then the galaxy must stay, quietly.
-    if (PREVIEW) {
-      const { ctx, page, errors } = await standIn({}, "", PREVIEW);
+    // The words over the moving footage, at desktop and phone sizes:
+    // measured at each thought of the first chapter while the video plays.
+    for (const size of [[1920, 1080], [390, 844], [360, 844], [414, 896]] as Array<[number, number]>) {
+      const at = `${engine} ${size[0]}x${size[1]} over the video`;
+      const { ctx, page, errors } = await videoCtx({}, "", "real", size);
       await page.goto(ABOUT, { waitUntil: "load" });
-      await page.waitForTimeout(2500);
-      const top = await stage(page);
+      await page.waitForTimeout(3000);
+      const playing = (await stage(page)).playing;
+      if (engine === "webkit" && !playing) { await ctx.close(); continue; }
       const shots = new Map<string, number>();
-      const n: number = await page.evaluate(() => document.querySelectorAll("#how .about-beat").length);
       await contrastPass(page, shots);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/about-${engine}-${size[0]}x${size[1]}-video-0.png` });
+      const n: number = await page.evaluate(() => document.querySelectorAll("#how .about-beat").length);
+      let stillPlaying = true;
       for (let i = 0; i < n; i++) {
-        await page.evaluate((i: number) => { const r = document.querySelectorAll("#how .about-beat")[i]!.getBoundingClientRect(); window.scrollTo({ top: r.top + scrollY + r.height / 2 - innerHeight / 2, behavior: "instant" }); }, i);
-        await page.waitForTimeout(1000);
-        if (SHOTS) await page.screenshot({ path: `${SHOTS}/about-${engine}-video-${i + 1}.png` });
-        await contrastPass(page, shots);
-      }
-      const during = await stage(page);
-      await page.evaluate(() => document.getElementById("focus")!.scrollIntoView({ behavior: "instant" }));
-      await page.waitForTimeout(1800);
-      const after = await stage(page);
-      await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
-      await page.waitForTimeout(1800);
-      const again = await stage(page);
-      const silent = top.muted && top.loop && top.inline;
-      if (engine === "chromium" || top.playing) {
-        report(`${where} with ${process.env.PREVIEW_VIDEO!.split("/").pop()!.slice(0, 24)}…`, "plays behind How it works only", silent && top.on && during.on && during.playing && !after.on && !after.playing && again.on && again.playing, `muted, looped, inline ${silent}; top ${top.on ? "shown" : "hidden"}/${top.playing ? "playing" : "paused"}, still in How ${during.on ? "shown" : "hidden"}, at Focus ${after.on ? "shown" : "hidden"}/${after.playing ? "playing" : "paused"}, back at top ${again.on ? "shown" : "hidden"}/${again.playing ? "playing" : "paused"}`);
-      } else {
-        report(`${where} with video, autoplay refused`, "galaxy stays, no error", silent && !top.on && top.slotOpacity === 0 && top.poster && !after.on, `muted, looped, inline ${silent}; slot on ${top.on}, opacity ${top.slotOpacity}, galaxy ${top.poster}`);
+        await page.evaluate((i: number) => { const k = [...document.querySelectorAll("#how .about-beat")[i]!.children].map((c) => c.getBoundingClientRect()); const mid = (Math.min(...k.map((r) => r.top)) + Math.max(...k.map((r) => r.bottom))) / 2; window.scrollTo({ top: scrollY + mid - innerHeight / 2, behavior: "instant" }); }, i);
+        await page.waitForTimeout(1200);
+        if (SHOTS) await page.screenshot({ path: `${SHOTS}/about-${engine}-${size[0]}x${size[1]}-video-${i + 1}.png` });
+        // Three frames apart, so a bright moment in the footage is caught.
+        for (let f = 0; f < 3; f++) { await contrastPass(page, shots); await page.waitForTimeout(400); }
+        stillPlaying &&= (await stage(page)).playing;
       }
       const low = [...shots].filter(([, c]) => c < 4.5);
-      report(`${where} over the video`, "contrast >= 4.5:1", shots.size > 0 && low.length === 0, `${shots.size} text runs, lowest ${Math.min(...shots.values()).toFixed(2)}:1${low.length ? `; low: ${low.map(([t, c]) => `"${t}" ${c.toFixed(2)}`).join(", ")}` : ""}`);
-      report(`${where} with video`, "no console errors", errors.length === 0, errors.length ? errors.slice(0, 3).join(" | ") : "none");
+      report(at, "contrast >= 4.5:1", playing && stillPlaying && shots.size > 0 && low.length === 0, `playing ${playing && stillPlaying}, ${shots.size} text runs, lowest ${Math.min(...shots.values()).toFixed(2)}:1${low.length ? `; low: ${low.map(([t, c]) => `"${t}" ${c.toFixed(2)}`).join(", ")}` : ""}`);
+      report(at, "no console errors", errors.length === 0, errors.length ? errors.slice(0, 3).join(" | ") : "none");
       await ctx.close();
+    }
+
+    // Performance with the video against without it (reduced motion makes
+    // none), Chromium only: the largest paint, and long tasks and layout
+    // shift over the first 4 seconds, while the video starts and plays.
+    if (engine === "chromium") {
+      const perfOf = async (opts: Record<string, unknown>, size: [number, number]) => {
+        const { ctx, page, seen } = await videoCtx(opts, "", "real", size);
+        let bytes = 0;
+        page.on("response", async (r: any) => { if (MOON.test(new URL(r.url()).pathname)) { try { bytes += (await r.body()).length; } catch {} } });
+        await page.goto(ABOUT, { waitUntil: "load" });
+        await page.waitForTimeout(4000);
+        const p = await page.evaluate(() => ({ ...(window as any).__perf, load: (window as any).__loadAt, playing: !!document.querySelector("video") && !(document.querySelector("video") as HTMLVideoElement).paused }));
+        await ctx.close();
+        return { ...p, fetched: seen.fetched, bytes };
+      };
+      for (const size of [[1920, 1080], [390, 844]] as Array<[number, number]>) {
+        const withV = await perfOf({}, size);
+        const without = await perfOf({ reducedMotion: "reduce" }, size);
+        const fmt = (p: any) => `LCP ${Math.round(p.lcp)}ms, load ${Math.round(p.load)}ms, long tasks ${p.long.length}, CLS ${p.cls.toFixed(4)}, video ${p.playing ? "playing" : "none"}, ${p.fetched} video requests, ${(p.bytes / 1024 / 1024).toFixed(2)} MB of video in 4s`;
+        report(`chromium ${size[0]}x${size[1]} performance`, "video adds no long task, no shift, no slower paint", withV.playing && withV.long.length === 0 && withV.cls === 0 && withV.lcp > 0 && withV.lcp <= 1000 && withV.lcp <= without.lcp + 100, `with video: ${fmt(withV)} | without: ${fmt(without)}`);
+      }
     }
 
     // Without JavaScript every word is there and fully shown.
