@@ -75,6 +75,8 @@ const ASSETS: Record<string, string> = {
   "/assets/arrival-film-music.mp3": "audio/mpeg",
   "/assets/arrival-film-720.webm": "video/webm",
   "/assets/arrival-film-720.mp4": "video/mp4",
+  "/assets/about-moon-576.webm": "video/webm",
+  "/assets/about-moon-576.mp4": "video/mp4",
   ...Object.fromEntries(BREAK_MODES.map((m) => [m.src, "audio/mpeg"])),
 };
 

@@ -74,3 +74,44 @@ it.skipIf(!hasFfmpeg)("the film stays within three flashes a second", () => {
     expect(worst, `${file}: brightness swings in one second`).toBeLessThanOrEqual(5);
   }
 });
+
+// The About page's background: NASA lunar footage, cropped to its picture
+// and re-encoded without sound (docs/credits.md). It plays behind the first
+// chapter only, so it must be small, silent and calm.
+const MOON = ["public/assets/about-moon-576.mp4", "public/assets/about-moon-576.webm"];
+
+it("each About video file is at most 2.5 MB", () => {
+  for (const f of MOON) expect(statSync(f).size, f).toBeLessThanOrEqual(2.5 * 1024 * 1024);
+});
+
+it("the About MP4 has no audio track", () => {
+  const bytes = readFileSync(MOON[0]!);
+  const handlers: string[] = [];
+  for (let i = bytes.indexOf("hdlr"); i !== -1; i = bytes.indexOf("hdlr", i + 4)) {
+    handlers.push(bytes.subarray(i + 12, i + 16).toString("latin1"));
+  }
+  expect(handlers).toContain("vide");
+  expect(handlers).not.toContain("soun");
+});
+
+it.skipIf(!hasFfmpeg)("the About videos have no audio stream at all, and stay within three flashes a second", () => {
+  for (const file of MOON) {
+    const streams = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", file], { encoding: "utf8" }).trim().split("\n");
+    expect(streams, file).toEqual(["video"]);
+    const means = frameMeans(file);
+    expect(means.length, file).toBeGreaterThan(30 * 25);
+    let swings = 0;
+    const big: number[] = [];
+    let prev: { size: number; last: number } | undefined;
+    for (let i = 1; i < means.length; i++) {
+      const step = means[i]! - means[i - 1]!;
+      if (Math.abs(step) < 3) continue;
+      if (prev && Math.sign(prev.size) === Math.sign(step) && i - prev.last <= 4) { prev.size += step; prev.last = i; }
+      else { if (prev && Math.abs(prev.size) >= 25) big.push(prev.last); prev = { size: step, last: i }; swings++; }
+    }
+    if (prev && Math.abs(prev.size) >= 25) big.push(prev.last);
+    let worst = 0;
+    for (const start of big) worst = Math.max(worst, big.filter((at) => at >= start && at < start + 30).length);
+    expect(worst, `${file}: brightness swings in one second`).toBeLessThanOrEqual(5);
+  }
+});

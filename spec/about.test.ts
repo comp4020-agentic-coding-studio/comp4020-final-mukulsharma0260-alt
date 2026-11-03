@@ -55,8 +55,8 @@ it("the About page loads no lounge script, no stream, no API and no film", async
   const html = await (await get("/about/")).text();
   expect(html).not.toMatch(/sky\.js|EventSource|\/events|\/api\/|fetch\(|XMLHttpRequest|sendBeacon/);
   expect(html).not.toMatch(/arrival-film|film-cloud|<audio/);
-  // No video in the page itself: the still galaxy is the background until an
-  // approved one is set, and then only the script adds it.
+  // No video element in the page itself: only the script adds one, and only
+  // near the first chapter.
   expect(html).not.toMatch(/<video/);
   expect(html).toContain("/assets/arrival-galaxy-960.webp");
 });
@@ -139,20 +139,69 @@ it("every word is there without JavaScript; the teleprompter dims only once its 
   expect(doc.querySelectorAll("audio, video")).toHaveLength(0);
 });
 
-it("the moving background is optional, lazy and silent, and the still galaxy stays for reduced motion, Save-Data, 2g and failures", async () => {
+// The background video: NASA lunar footage, silent copies derived for the
+// page (docs/credits.md). Only the first chapter has it, and only the
+// script makes it, so the page itself carries no <video> and no media.
+const MOON = { mp4: "/assets/about-moon-576.mp4", webm: "/assets/about-moon-576.webm" };
+
+it("the moving background belongs to the first chapter only, in two silent formats", async () => {
+  const doc = await page();
+  const slots = [...doc.querySelectorAll<HTMLElement>("[data-about-video]")];
+  expect(slots).toHaveLength(1);
+  const slot = slots[0]!;
+  expect(slot.getAttribute("data-for")).toBe("how");
+  expect(slot.getAttribute("aria-hidden")).toBe("true");
+  expect(slot.getAttribute("data-mp4")).toBe(MOON.mp4);
+  expect(slot.getAttribute("data-webm")).toBe(MOON.webm);
+  // Named nowhere else on the page: no later chapter can pick it up.
+  const html = doc.documentElement.outerHTML;
+  for (const f of Object.values(MOON)) expect(html.split(f).length - 1, f).toBe(1);
+  // Decorative: it sits in the hidden stage, outside the story.
+  expect(slot.closest(".about-stage[aria-hidden='true']")).not.toBeNull();
+  expect(slot.closest("main")).toBeNull();
+});
+
+it("the video is muted, looped, inline, never preloaded, never focusable and never given controls", async () => {
+  const js = script(await page());
+  for (const must of ["muted = true", "defaultMuted = true", "loop = true", "playsInline = true", 'setAttribute("playsinline"', 'preload = "none"', 'tabIndex = -1', 'disablepictureinpicture', 'disableremoteplayback']) expect(js, must).toContain(must);
+  expect(js).not.toMatch(/controls\s*=\s*true|setAttribute\("controls"|autoplay|\.volume\s*=|muted\s*=\s*false|unmute/i);
+  // The format is chosen by what the browser says it can play.
+  expect(js).toContain("canPlayType");
+});
+
+it("the video is made lazily, never under reduced motion, Save-Data, 2g or slow-2g, and paused when not seen", async () => {
+  const js = script(await page());
+  for (const guard of ["prefers-reduced-motion: reduce", "saveData", "slow-2g", "2g"]) expect(js, guard).toContain(guard);
+  // Only once its chapter has stayed near for a moment.
+  expect(js).toContain("IntersectionObserver");
+  expect(js).toMatch(/setTimeout\(make,\s*\d{3,}\)/);
+  // Paused when the tab is hidden, the chapter is off screen, or the page is left.
+  for (const pause of ["visibilitychange", "pagehide", "video.pause()"]) expect(js, pause).toContain(pause);
+});
+
+it("if the video cannot load or play, the still galaxy stays", async () => {
   const doc = await page();
   const js = script(doc);
-  // It belongs to the first chapter: shown only while that chapter is on screen.
-  const slot = doc.querySelector<HTMLElement>("[data-about-video]");
-  expect(slot?.getAttribute("data-for")).toBe("how");
-  // Empty until an approved video's source and licence are recorded.
-  expect(slot!.getAttribute("data-src") ?? "").toBe("");
-  expect(slot!.getAttribute("aria-hidden")).toBe("true");
-  for (const guard of ["prefers-reduced-motion: reduce", "saveData", "slow-2g", "2g"]) expect(js).toContain(guard);
-  // Muted, looped, inline, never preloaded, made only near its chapter.
-  for (const must of ["muted = true", "loop = true", "playsinline", 'preload = "none"', "IntersectionObserver", '"error"']) expect(js).toContain(must);
-  // The poster is the credited galaxy, painted with the page.
+  // A load error or a refused play removes it; the slot is hidden until it plays.
+  expect(js).toContain('"error"');
+  expect(js).toMatch(/play\(\)[^;]*;[^}]*catch/);
+  expect(css(doc)).toMatch(/\.about-video-slot\s*\{[^}]*opacity:\s*0/);
+  expect(css(doc)).toMatch(/\.about-video-slot\.is-on\s*\{[^}]*opacity:\s*1/);
+  // The poster and fallback is the credited galaxy, painted with the page.
   expect(css(doc)).toMatch(/\.about-stage[^{]*\{[^}]*arrival-galaxy-960\.webp/);
+  // Reduced motion hides it even if a browser had made one.
+  expect(css(doc)).toMatch(/prefers-reduced-motion:\s*reduce\)\s*\{[^@]*\.about-video\s*\{\s*display:\s*none/);
+});
+
+it("both video files are served, with byte ranges for Safari", async () => {
+  for (const [kind, f] of Object.entries(MOON)) {
+    const res = await get(f, { headers: { Range: "bytes=0-99" } });
+    expect(res.status, f).toBe(206);
+    expect(res.headers.get("content-type")).toBe(`video/${kind}`);
+    expect(res.headers.get("accept-ranges")).toBe("bytes");
+    expect(res.headers.get("set-cookie")).toBeNull();
+    await res.arrayBuffer();
+  }
 });
 
 it("the lounge's visible About links open the About page", async () => {

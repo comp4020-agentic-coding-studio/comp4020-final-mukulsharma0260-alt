@@ -109,6 +109,28 @@ track.
 The supplied originals are kept, unshipped, in the gitignored
 `assets-src/break/`.
 
+## About page background video
+
+- **Files:** `public/assets/about-moon-576.mp4` and `about-moon-576.webm`
+- **Source:** NASA public-domain footage; provenance verified by the project
+  owner; original NASA asset URL to be added. **Provisional:** until that URL
+  or asset identifier is recorded here, no mission, creator or asset ID is
+  claimed.
+- **Supplied:** a local copy, supplied by the project owner on 3 November
+  2026: 60 seconds of black-and-white footage of astronauts working on the
+  lunar surface, 736x414 H.264 with an AAC audio track. It is kept, unshipped,
+  in the gitignored `assets-src/about/`.
+- **Use:** a muted, decorative background behind the first chapter of the
+  About page (`/about/`) only. It is never needed to read the page.
+- **Licence:** public domain (NASA footage), as verified by the project owner.
+- **Changes:** cropped to the picture (576x400; the supplied copy has black
+  bars in its frame), metadata removed and the audio track removed entirely:
+  the shipped files have no audio stream. Encoded as H.264 (CRF 26, with the
+  index at the front for Safari), about 2.0 MB, and VP9 (CRF 38), about
+  1.4 MB, at SSIM 0.989 and 0.980 against the cropped original. The page
+  shows it in greyscale, dimmed, under a dark scrim. `spec/media.test.ts`
+  checks the missing audio, the size and the flash limit.
+
 ## Documentation artwork
 
 - **Files:** `docs/assets/overlap-banner.svg`, `process-banner.svg`,
@@ -138,6 +160,8 @@ The page serves only these optimised copies, made from the originals above:
   `arrival-galaxy-v3.png` as the fallback for browsers without WebP
 - `public/assets/arrival-nebula-720.webm` and `arrival-nebula-720.mp4`, both
   with no audio stream
+- `public/assets/about-moon-576.mp4` and `about-moon-576.webm`, both with no
+  audio stream
 - `public/assets/arrival-film-720.webm` and `arrival-film-720.mp4`, the
   film, both with no audio stream
 - `public/assets/arrival-film-music.mp3`, the film's soundtrack

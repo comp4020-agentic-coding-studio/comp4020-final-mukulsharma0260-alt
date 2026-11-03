@@ -10,15 +10,15 @@
 // without the script every thought is simply shown, one under another. The
 // background is the arrival's galaxy, a picture outside the lounge, so no
 // point of light here is a visitor, and nothing on the page pretends to be
-// one. A moving background can play behind the first chapter once an
-// approved video is set below; until its source and licence are recorded in
-// docs/credits.md the slot is empty and nothing is fetched.
+// one. Behind the first chapter only, silent NASA lunar footage can play
+// (docs/credits.md); it is optional, and the galaxy is always there under it.
 import { CONSTELLATION_INFO } from "./render.ts";
 import { CONSTELLATIONS } from "./db.ts";
 
-// The approved background video, if any: a path under /assets/ that is
-// listed in docs/credits.md. Empty: the still galaxy is the background.
-const ABOUT_VIDEO = "";
+// The first chapter's background: NASA lunar footage, cropped to its picture
+// and re-encoded with no audio track (docs/credits.md). MP4 where the browser
+// plays H.264, WebM otherwise. Empty strings would leave the still galaxy.
+const ABOUT_VIDEO = { webm: "/assets/about-moon-576.webm", mp4: "/assets/about-moon-576.mp4" };
 
 // One constellation as faint lines and hollow diamonds, the lounge's own
 // figure, in a small square. Decoration only: never a circle or a dot.
@@ -113,13 +113,12 @@ export function renderAboutPage(): string {
   @media (min-width: 1200px) {
     .about-stage { background-image: url("/assets/arrival-galaxy-1920.webp"); }
   }
-  /* The first chapter's background: the video, when one is approved, over
-     the galaxy and under the scrim, shown only while that chapter (named by
-     data-for) is on screen. Scaled past cover so footage with bars baked
-     into its frame still fills the screen edge to edge. */
+  /* The first chapter's background: the NASA footage over the galaxy and
+     under the scrim, shown only while that chapter (named by data-for) is
+     on screen. Grey and dimmed so it stays behind the words. */
   .about-video-slot { position: absolute; inset: 0; background: var(--void); opacity: 0; transition: opacity 1.4s var(--ease-calm); }
   .about-video-slot.is-on { opacity: 1; }
-  .about-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scale(1.34); filter: grayscale(1) contrast(1.1) brightness(0.8); }
+  .about-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) contrast(1.05) brightness(0.8); }
   .stage-light {
     position: absolute;
     inset: -20%;
@@ -234,6 +233,10 @@ export function renderAboutPage(): string {
     .about-progress ol { grid-auto-flow: column; justify-content: center; gap: 0; }
     .about-progress a { padding: 0; justify-content: center; }
     /* Out of sight but still each link's name for a screen reader. */
+    /* Under the phone's heavier scrim the footage would all but vanish, so
+       it is a little brighter here; the scrim, and so the words, are as on
+       every other chapter. */
+    .about-video { filter: grayscale(1) contrast(1.1) brightness(1.15); }
     .about-progress .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .chapter-head { padding-top: 26vh; }
     h1, h2 { font-size: clamp(2.3rem, 11vw, 3rem); }
@@ -261,7 +264,7 @@ export function renderAboutPage(): string {
 </head>
 <body>
 <div class="about-stage" aria-hidden="true">
-  <div class="about-video-slot" data-about-video data-for="how" data-src="${ABOUT_VIDEO}" aria-hidden="true"></div>
+  <div class="about-video-slot" data-about-video data-for="how" data-webm="${ABOUT_VIDEO.webm}" data-mp4="${ABOUT_VIDEO.mp4}" aria-hidden="true"></div>
   <div class="stage-light"></div>
   ${stageLines()}
   <div class="about-scrim"></div>
@@ -352,19 +355,34 @@ export function renderAboutPage(): string {
     }, { rootMargin: "-45% 0px -45% 0px" });
     document.querySelectorAll("main section").forEach(function (s) { onChapter.observe(s); });
 
-    // The moving background: only once an approved video is set, never under
-    // reduced motion, Save-Data or 2g, made only as its chapter approaches,
-    // shown only while that chapter is on screen, silent, and paused when
-    // the tab is hidden. If it cannot play, the galaxy simply stays.
+    // The moving background: never under reduced motion, Save-Data or 2g,
+    // made only once its chapter has stayed near, shown only while that
+    // chapter is on screen, silent, and paused whenever it is not seen. If it
+    // cannot load or play, the galaxy simply stays.
     var slot = document.querySelector("[data-about-video]");
-    var src = slot && slot.getAttribute("data-src");
-    if (!slot || !src || reduce || light) return;
+    if (!slot || reduce || light) return;
+    var probe = document.createElement("video");
+    var src = "";
+    // H.264 first: Safari and iPhone play it most reliably. VP9 WebM for a
+    // browser without H.264.
+    if (slot.getAttribute("data-mp4") && probe.canPlayType && probe.canPlayType('video/mp4; codecs="avc1.64001f"')) src = slot.getAttribute("data-mp4");
+    else if (slot.getAttribute("data-webm") && probe.canPlayType && probe.canPlayType('video/webm; codecs="vp9"')) src = slot.getAttribute("data-webm");
+    if (!src) return;
     var how = document.getElementById(slot.getAttribute("data-for"));
     var video = null;
     var inView = false;
+    function drop() {
+      if (!video) return;
+      slot.classList.remove("is-on");
+      video.removeAttribute("src");
+      video.load();
+      video.remove();
+      video = null;
+    }
     function make() {
       // Silent before it has a source: Safari allows a muted inline video to
-      // play by itself only if it is muted from the start.
+      // play by itself only if it is muted from the start. Decorative: no
+      // controls, never focused, never cast or popped out.
       video = document.createElement("video");
       video.className = "about-video";
       video.setAttribute("muted", "");
@@ -372,6 +390,8 @@ export function renderAboutPage(): string {
       video.setAttribute("loop", "");
       video.setAttribute("aria-hidden", "true");
       video.setAttribute("disablepictureinpicture", "");
+      video.setAttribute("disableremoteplayback", "");
+      video.tabIndex = -1;
       video.muted = true;
       video.defaultMuted = true;
       video.loop = true;
@@ -379,13 +399,13 @@ export function renderAboutPage(): string {
       video.preload = "none";
       video.addEventListener("playing", function () { slot.classList.toggle("is-on", inView); });
       video.addEventListener("loadeddata", function () { if (inView && !document.hidden) play(); });
-      video.addEventListener("error", function () { slot.classList.remove("is-on"); video.remove(); video = null; });
+      video.addEventListener("error", drop);
       slot.appendChild(video);
       video.src = src;
       if (inView && !document.hidden) play();
     }
     // A refused play leaves the galaxy showing; nothing else depends on it.
-    function play() { var p = video && video.play(); if (p && p.catch) p.catch(function () {}); }
+    function play() { var p = video && video.play(); if (p && p.catch) p.catch(function () { slot.classList.remove("is-on"); }); }
     // Made when the chapter is within a screen of view. Shown, and playing,
     // while the chapter still reaches past the middle of the screen; once
     // the next chapter takes over it cross-fades back to the galaxy. Read
@@ -419,6 +439,10 @@ export function renderAboutPage(): string {
       if (!video) return;
       if (document.hidden) video.pause(); else if (inView) play();
     });
+    // Leaving the page pauses it; coming back (the back-forward cache)
+    // resumes it only if its chapter is still the one on screen.
+    window.addEventListener("pagehide", function () { if (video) { video.pause(); slot.classList.remove("is-on"); } });
+    window.addEventListener("pageshow", function (e) { if (e.persisted) { inView = false; check(); } });
     if (document.readyState === "complete") start();
     else window.addEventListener("load", start, { once: true });
   })();
