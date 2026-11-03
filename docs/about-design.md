@@ -31,52 +31,45 @@ waiting on a decision: its background video.
 - `scripts/check-about.ts` checks all of this in Chromium and WebKit at seven
   sizes; the results are in `docs/evidence/about-check.md`.
 
-## The background video (pending source verification)
+## The background video
 
-The first chapter, "How Overlap works", has a slot for a full-bleed moving
-background behind a dark scrim. The slot ships **empty**
-(`ABOUT_VIDEO = ""` in `src/about.ts`), so the live page shows the still
-galaxy.
+The first chapter, "How Overlap works", plays NASA lunar footage behind a
+dark scrim: astronauts working slowly on the Moon, in greyscale. Its source
+is recorded in `docs/credits.md`. That credit is provisional until the
+original NASA asset URL is added. The page ships two silent copies,
+`about-moon-576.mp4` and `about-moon-576.webm`.
 
-The video the user supplied for it is **not used, copied or credited** yet:
+Why it is limited like this:
 
-- What it is: a 60-second clip of lunar-surface footage (it appears to be
-  Apollo mission film), 736x414 H.264 with an AAC audio track, about 2.9 MB.
-- Where it came from: a Klickpin download of a Pinterest pin. That is a
-  repost, not the original source, and CLAUDE.md allows nothing from social
-  media.
-- Status: **pending source verification.** The user will supply the
-  original Pexels URL and licence details. Until then it has no entry in
-  `docs/credits.md` and no copy anywhere in the repository.
+- **First chapter only.** The video is the opening mood: someone else, far
+  away, also at work. Later chapters explain constellations and
+  conversations, and a moving picture there would compete with the words.
+  So it cross-fades back to the galaxy as the next chapter takes over and
+  pauses, and the galaxy carries the rest of the page.
+- **Muted, with no audio at all.** The shipped files have no audio track,
+  and the element is muted before it has a source. Sound on a page someone
+  opens to read would startle them, and Safari plays a video by itself only
+  if it is muted from the start.
+- **Lazy.** Nothing is fetched at load. The video is made only once its
+  chapter has stayed within a screen of view for 600ms, so a link straight
+  to a later chapter fetches nothing. It is about 2 MB, so it should never
+  cost a reader who does not see it.
+- **Optional.** It is decorative (`aria-hidden`, no controls, never
+  focusable, no picture-in-picture or casting), and every word is real HTML
+  over it. It is never made under reduced motion, Save-Data, 2g or slow-2g.
+- **Paused when unseen:** off its chapter, in a hidden tab, and when the page
+  is left. It resumes only while its chapter is on screen.
+- **Falls back to the galaxy.** The galaxy is always painted under it, as
+  the poster. If the file cannot be fetched or decoded, it is removed. If
+  the browser refuses to play it, the slot stays hidden. Either way the
+  reader sees the still galaxy with nothing blank and no error. Headless
+  WebKit refuses a page's own first `play()`, so the check accepts either
+  outcome there: the galaxy, or the video playing behind its chapter.
+- **Calm.** The supplied copy has black bars in its frame, so the shipped
+  files are cropped to the picture rather than scaled past them. On a
+  phone, under the heavier scrim, the footage is a little brighter, so it
+  still reads as the Moon. The scrim itself is unchanged, so later chapters
+  keep their contrast. The footage stays within three flashes a second.
 
-It was used only to preview the design locally: the browser check, given
-`PREVIEW_VIDEO=<file>`, serves the file from outside the repository to its
-own browser through a request route. Nothing was re-encoded or saved.
-
-Once the source and licence are confirmed, the steps are:
-
-1. Record the source URL, author and licence in `docs/credits.md`.
-2. Produce a small, silent, web-ready copy (no audio track; the page never
-   plays sound), and put it under `public/assets/`.
-3. Set `ABOUT_VIDEO` to its path, update the empty-slot test in
-   `spec/about.test.ts`, and rerun `scripts/check-about.ts` with and without
-   `PREVIEW_VIDEO`.
-
-## How the video behaves once set
-
-- Muted, looped and `playsinline`, decorative (`aria-hidden`), never
-  preloaded, with no controls and no picture-in-picture.
-- Made only once its chapter has stayed within a screen of view for 600ms,
-  so a link straight to a later chapter fetches nothing.
-- Shown and playing only while the first chapter still reaches past the
-  middle of the screen. Then it cross-fades back to the galaxy and pauses.
-  It also pauses while the tab is hidden.
-- Never made under reduced motion, Save-Data, 2g or slow-2g.
-- If it fails to load, or the browser refuses to play it, the galaxy stays,
-  with no error. Headless WebKit refuses a page's own `play()` without a
-  gesture. The check expects that and verifies the galaxy stays. Safari
-  allows a muted inline video to play by itself.
-- Scaled past `cover` and shown in greyscale, so footage with bars in its
-  frame still fills the screen and stays quiet behind the words. Contrast
-  over an approved video must be measured with `PREVIEW_VIDEO` before it
-  ships; the preview clip is not evidence.
+H.264 is chosen where the browser plays it, which is what Safari and iPhone
+play most reliably; VP9 WebM is used otherwise.
