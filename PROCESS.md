@@ -36,7 +36,7 @@ The trade-off is one machine. The Fly volume holds the only copy of the data. Pr
 
 ## Directing and correcting the agent
 
-I wrote rules in `CLAUDE.md` before code, approved plans before implementation, and reviewed plans in a separate Claude chat. The agent wrote most of the code; these are places I changed its direction.
+I wrote the first `CLAUDE.md` rules in the first hour of code ([`69dc04e`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/69dc04e)), approved plans before implementation, and reviewed plans in a separate Claude chat. The agent wrote most of the code; these are places I changed its direction.
 
 - **The wrong question.** My first real-time decision record compared transports when the question was what "live" may mean. I superseded it ([`6c3f397`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/6c3f397)) and kept no grace period, so a reload briefly dims a star.
 - **Callsigns off the star.** An early plan stored callsigns on the star. It was rejected before any code, because a visitor must be able to choose a callsign first, so callsigns became their own table keyed by the identity hash ([`acff055`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/acff055)). That design exposed a real bug, a second cookie minted for one browser, fixed in [`b446a75`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/b446a75).
@@ -82,7 +82,7 @@ Message expiry is four separate claims:
 3. **Deleted.** A server sweep deletes the row ([`40b7800`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/40b7800)), deployed on 27 October ([`cb00e59`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/cb00e59)). The sweep runs only while the machine is awake, so deletion can lag after an idle night.
 4. **Not erased from copies.** Expired rows may survive in volume snapshots and backups.
 
-There is no moderation or report path, and callsigns are never released.
+There is no moderation or report path, and callsigns are never released. No one outside the project has tested the lounge, and the media credits rest on my own declaration ([`9819c87`](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/commit/9819c87)).
 
 ---
 
