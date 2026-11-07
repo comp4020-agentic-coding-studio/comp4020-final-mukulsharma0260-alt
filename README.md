@@ -48,7 +48,7 @@ Overlap began as an artwork about old light; I dropped it because nothing gave v
 
 ## Judged: needs people
 
-Whether the lounge feels calm rather than empty, reads at a glance, and feels like company, not surveillance. No one outside class has judged it yet; [the testing protocol](https://github.com/comp4020-agentic-coding-studio/comp4020-final-mukulsharma0260-alt/blob/main/docs/evidence/friend-testing.md) says how they will.
+Whether the lounge feels calm rather than empty, reads at a glance, and feels like company, not surveillance. These qualities need human judgement; this release records automated and author testing only.
 
 ## Known limits
 

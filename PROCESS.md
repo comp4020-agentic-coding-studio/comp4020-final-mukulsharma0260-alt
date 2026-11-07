@@ -4,21 +4,11 @@
 
 <p align="center"><img src="docs/assets/badge-node.svg" alt="runtime: Node 24"> <img src="docs/assets/badge-sqlite.svg" alt="storage: node:sqlite"> <img src="docs/assets/badge-sse.svg" alt="live: server-sent events"> <img src="docs/assets/badge-fly.svg" alt="deploy: one Fly.io machine"> <a href="docs/adr/"><img src="docs/assets/badge-adr.svg" alt="decisions: 12 ADRs"></a></p>
 
-<p align="center"><a href="#testing-outside-class">Testing status</a> · <a href="#from-old-light-to-a-study-lounge">Concept</a> · <a href="#a-small-stack-on-one-machine">Stack</a> · <a href="#directing-and-correcting-the-agent">Agent</a> · <a href="#rules-that-became-tests">Tests</a> · <a href="#operational-mistakes">Mistakes</a> · <a href="#deliberate-limits">Limits</a> · <a href="README.md">README</a></p>
+<p align="center"><a href="#from-old-light-to-a-study-lounge">Concept</a> · <a href="#a-small-stack-on-one-machine">Stack</a> · <a href="#directing-and-correcting-the-agent">Agent</a> · <a href="#rules-that-became-tests">Tests</a> · <a href="#operational-mistakes">Mistakes</a> · <a href="#deliberate-limits">Limits</a> · <a href="README.md">README</a></p>
 
 ---
 
 Building Overlap was less about features than about deciding what the app may honestly claim about people, then making the server and its tests hold to that.
-
-## Testing outside class
-
-No informal testing outside class has happened yet. When it does, factual notes and consented photographs will be added here, following [the testing protocol](docs/evidence/friend-testing.md). Until then, every judgement about how the lounge feels comes from my own use and screenshot review, and the stars in local screenshots come from tests, not visitors.
-
-<!--
-![Informal two-person Overlap test: separate browser profiles using the live site](docs/evidence/friend-tests/YYYY-MM-DD-two-person-test.jpg)
-
-*Informal testing outside class, [date]. Two students opened the deployed app from the public URL in separate browser profiles. Observation: [factual result]. Follow-up: [commit, test, ADR, or no change]. Faces, private messages, unrelated tabs, and location information are cropped or blurred with consent.*
--->
 
 ## From old light to a study lounge
 
