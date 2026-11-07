@@ -1,8 +1,8 @@
 # About page design notes
 
 The About page at `/about/` (`src/about.ts`) is a page to read, not a second
-home page. These notes record what it is meant to do and the one thing still
-waiting on a decision: its background video.
+home page. These notes record what it is meant to do and why its background
+video is limited as it is.
 
 ## Shape
 
@@ -34,9 +34,9 @@ waiting on a decision: its background video.
 ## The background video
 
 The first chapter, "How Overlap works", plays NASA lunar footage behind a
-dark scrim: astronauts working slowly on the Moon, in greyscale. Its source
-is recorded in `docs/credits.md`. That credit is provisional until the
-original NASA asset URL is added. The page ships two silent copies,
+dark scrim: astronauts working slowly on the Moon, in greyscale. Its source,
+as identified by the project author, is NASA's *Restored Apollo 11
+Moonwalk*, credited in `docs/credits.md`. The page ships two silent copies,
 `about-moon-576.mp4` and `about-moon-576.webm`.
 
 Why it is limited like this:
